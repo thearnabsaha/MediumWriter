@@ -4,6 +4,22 @@ import { useCallback, useRef, useState } from "react";
 
 export type ModelInfo = { id: string; label: string; index: number };
 
+/**
+ * Strip every emoji codepoint from a generated article. Defense in depth:
+ * the system prompt forbids emojis, but models occasionally sneak one in.
+ * Uses Unicode property escapes (Extended_Pictographic) to catch any of them.
+ */
+function stripEmojis(input: string): string {
+  if (!input) return input;
+  // \p{Extended_Pictographic} matches all emoji glyphs; \uFE0F is the
+  // variation selector commonly attached after a base char to make it emoji.
+  return input
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/\uFE0F/g, "")
+    .replace(/[\u200D\u20E3]/g, "")
+    .replace(/  +/g, " ");
+}
+
 export type StreamState = {
   output: string;
   isStreaming: boolean;
@@ -127,7 +143,13 @@ export function useArticleStream() {
 
         if (buffer.trim()) handleLine(buffer.trim());
 
-        opts?.onComplete?.(acc);
+        const cleaned = stripEmojis(acc);
+        if (cleaned !== acc) {
+          // Replace mid-stream-rendered output (which may contain emojis) with
+          // the cleaned final version before notifying listeners.
+          setOutput(cleaned);
+        }
+        opts?.onComplete?.(cleaned);
       } catch (err) {
         if ((err as Error).name === "AbortError") {
           setError("Generation cancelled.");

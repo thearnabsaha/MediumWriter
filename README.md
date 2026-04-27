@@ -15,20 +15,50 @@ When you click **Copy to Medium**, the clipboard receives both `text/html` (clea
 
 ## Features
 
-- **Write Block** — enter a topic, click Generate, watch the article stream in.
+### Two writing modes (tabs at the top)
+
+- **Generate from topic** — enter a prompt, optionally enable Tavily research, watch the article stream in.
+- **Rewrite from article** — paste an existing article and pick a template:
+  - **No template** — keeps your own voice, just polishes for Medium (tightens sentences, adds structure, bold/italic/blockquotes/lists).
+  - **Saved sample** — rewrites in the voice of one of your saved Style Blocks.
+  - **Paste new** — paste any reference article and rewrite in its style.
+  - **Auto-enrich with Tavily** (on by default) — finds real recent web links and weaves them inline.
+  - **Word-count parity** — the rewrite stays within ±15% of your source's length, with a live "matches source length" badge in the preview.
+
+### Medium features used in every output
+
+The system prompt instructs the model to use Medium's full formatting toolbox:
+
+- `# Title`, `## Section headings`
+- `**bold**` for keywords (at least one per section)
+- `*italic*` for emphasis and asides
+- `> blockquote` for pull-quotes
+- `- bullet` and `1. numbered` lists
+- `---` horizontal rules between major sections
+- `[descriptive text](url)` inline anchors (never raw URLs)
+- **Photo suggestions** as clickable Unsplash search links inside blockquotes, e.g.
+  `> Photo suggestion: [search "morning coffee" on Unsplash](https://unsplash.com/s/photos/morning-coffee)`
+
+### Hard guarantees
+
+- **Zero emojis** — the prompt forbids them and the client strips any that slip through (defense in depth using `\p{Extended_Pictographic}`).
+- **Medium-safe HTML only** — no code fences, no tables, no `<img>` tags, no `###+` headings.
 - **Live model chip** — shows which Groq model is currently generating, with a fallback chain:
   1. `openai/gpt-oss-120b` (highest quality)
   2. `openai/gpt-oss-20b` (faster, cheaper)
   3. `openai/gpt-oss-safeguard-20b` (final fallback)
 
   If all three are rate-limited or unavailable, the app returns a clean **429** with a friendly retry message. Mid-stream fallbacks are also surfaced as a toast.
-- **Tavily research toggle** — when enabled, the app first runs a Tavily web search (advanced depth, 5 sources) and feeds the findings into the LLM prompt as a `RESEARCH CONTEXT` block. The LLM weaves the facts in naturally — no inline citations or footnote markers (so Medium paste stays clean).
-- **Style Block** — save up to 5 of your previous writing samples. The AI mimics your tone, sentence length, and vocabulary.
+
+### Other niceties
+
+- **Style Block** — save up to 5 of your previous writing samples. The AI mimics your tone, sentence length, and vocabulary in both modes.
+- **Sexy SVG favicon** — gradient "M" mark with green accent, light/dark friendly.
 - **Medium-style preview** — serif typography, generous line-height, max-width prose.
-- **Copy to Medium** — one-click clipboard copy with formatting preserved.
+- **Copy to Medium** — one-click clipboard copy with formatting preserved (`text/html` + `text/plain`).
 - **Inline edit** — toggle edit mode to tweak the output before copying.
 - **Export as Markdown** — download the raw `.md` file.
-- **Regenerate** — try a different take on the same topic.
+- **Regenerate / Rewrite again** — try a different take.
 - **Dark mode** — toggle in the header.
 
 ## Setup (local)
@@ -113,17 +143,33 @@ If the **first** call to every model fails before any tokens stream, the route r
 
 ### `POST /api/generate`
 
-Streams Medium-safe Markdown using a JSON-line (NDJSON) wire format.
+Streams Medium-safe Markdown using a JSON-line (NDJSON) wire format. Two modes via the `mode` field.
 
-Request body:
+**Generate mode:**
 
 ```json
 {
+  "mode": "generate",
   "prompt": "string (1-2000 chars)",
   "styleBlocks": ["string (max 5000 chars each)"],
   "research": [{ "title": "...", "url": "...", "content": "..." }]
 }
 ```
+
+**Rewrite mode:**
+
+```json
+{
+  "mode": "rewrite",
+  "oldArticle": "string (1-20000 chars)",
+  "templateArticle": "string (max 20000 chars, optional)",
+  "styleBlocks": ["string (max 5000 chars each)"],
+  "autoResearch": true,
+  "research": [{ "title": "...", "url": "...", "content": "..." }]
+}
+```
+
+When `autoResearch` is `true` and no `research` is supplied, the route runs a server-side Tavily search using a query derived from the old article and feeds the results into the prompt as `RESEARCH CONTEXT`. Tavily failures are non-fatal — the rewrite proceeds without extra links.
 
 Response: `application/x-ndjson; charset=utf-8` with one event per line:
 
@@ -164,19 +210,25 @@ Returns:
 
 ```
 app/
-  api/generate/route.ts   # streaming Groq endpoint with model fallback chain
+  api/generate/route.ts   # streaming Groq endpoint, generate + rewrite modes, fallback chain
   api/research/route.ts   # Tavily web search endpoint
-  layout.tsx              # fonts, dark-mode wrapper
+  icon.svg                # favicon (32x32 / 64x64 SVG)
+  apple-icon.svg          # iOS home-screen icon
+  layout.tsx              # fonts, dark-mode wrapper, metadata
   page.tsx                # two-column layout
   globals.css             # Medium-style typography
 components/
-  WriteBlock.tsx          # NDJSON stream parser, model chip, research toggle
+  Workspace.tsx           # tabbed container (Generate vs Rewrite)
+  WriteBlock.tsx          # generate-mode UI, research toggle
+  RewriteBlock.tsx        # rewrite-mode UI, template selector, auto-research, word-count meter
+  GenerationStatus.tsx    # model chip + fallback note + research status
   StyleBlock.tsx
   OutputPreview.tsx
   DarkModeToggle.tsx
   Spinner.tsx
 lib/
-  ai.ts                   # MODEL_FALLBACK_CHAIN + prompt builder
+  ai.ts                   # MODEL_FALLBACK_CHAIN + prompt builders + word-count helper
+  useArticleStream.ts     # NDJSON parser hook + emoji stripper
   styleProcessor.ts       # heuristic style summary
   markdownToMediumHtml.ts # Medium-safe HTML converter
   copyToMedium.ts         # clipboard with text/html + text/plain

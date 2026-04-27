@@ -10,6 +10,7 @@ import {
   type ChatMessage,
   type ResearchSnippet,
 } from "@/lib/ai";
+import { tavilySearch } from "@/lib/tavily";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,11 +42,16 @@ const RewriteModeSchema = z.object({
     .string()
     .min(1, "Old article cannot be empty")
     .max(20000, "Old article is too long (max 20000 characters)"),
+  /** Optional template article — when omitted the model polishes in place. */
   templateArticle: z
     .string()
-    .min(1, "Template article cannot be empty")
-    .max(20000, "Template article is too long (max 20000 characters)"),
+    .max(20000, "Template article is too long (max 20000 characters)")
+    .optional(),
   styleBlocks: StyleBlocksSchema,
+  /** Pre-computed research snippets (e.g. when client already called /api/research). */
+  research: z.array(ResearchSchema).max(10).optional(),
+  /** When true, run a server-side Tavily search using the old article's gist. */
+  autoResearch: z.boolean().optional(),
 });
 
 const RequestSchema = z.union([RewriteModeSchema, GenerateModeSchema]);
@@ -100,6 +106,28 @@ function isRetryableGroqError(err: unknown): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Derive a short, search-engine-friendly research query from a long article.
+ *
+ * Heuristic: take the first markdown # title if present, otherwise the first
+ * 12 non-trivial words from the body. Cap at ~150 chars so Tavily gets a tight
+ * query and we don't blow the request size.
+ */
+function deriveResearchQuery(article: string): string {
+  const titleMatch = article.match(/^\s*#\s+(.+)$/m);
+  if (titleMatch?.[1]) {
+    return titleMatch[1].trim().slice(0, 150);
+  }
+  const stripped = article
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[#>*_`\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!stripped) return "";
+  const words = stripped.split(" ").filter((w) => w.length > 2);
+  return words.slice(0, 12).join(" ").slice(0, 150);
 }
 
 /** Encode one event as a single newline-terminated JSON line for the stream. */
@@ -168,10 +196,43 @@ export async function POST(req: NextRequest) {
 
   let messages: ChatMessage[];
   if (parsed.data.mode === "rewrite") {
+    let rewriteResearch: ResearchSnippet[] | undefined =
+      parsed.data.research as ResearchSnippet[] | undefined;
+
+    // If the client asked for auto-research and didn't already supply snippets,
+    // do a quick server-side Tavily call using a query derived from the old
+    // article. We swallow Tavily errors so the rewrite still proceeds even when
+    // Tavily is unreachable or unkeyed — the model just gets no extra links.
+    if (
+      parsed.data.autoResearch &&
+      (!rewriteResearch || rewriteResearch.length === 0) &&
+      process.env.TAVILY_API_KEY
+    ) {
+      try {
+        const query = deriveResearchQuery(parsed.data.oldArticle);
+        if (query) {
+          const tavily = await tavilySearch({
+            query,
+            maxResults: 5,
+            searchDepth: "advanced",
+            includeAnswer: false,
+          });
+          rewriteResearch = tavily.results.map((r) => ({
+            title: r.title,
+            url: r.url,
+            content: r.content,
+          }));
+        }
+      } catch {
+        // intentionally non-fatal — fall through with no research
+      }
+    }
+
     messages = buildRewriteMessages({
       oldArticle: parsed.data.oldArticle,
       templateArticle: parsed.data.templateArticle,
       styleBlocks: parsed.data.styleBlocks,
+      research: rewriteResearch,
     });
   } else {
     messages = buildMessages({

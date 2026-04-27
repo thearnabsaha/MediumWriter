@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Lora } from "next/font/google";
 import "./globals.css";
 
@@ -17,7 +17,31 @@ const lora = Lora({
 export const metadata: Metadata = {
   title: "Medium Writer — AI articles that paste cleanly into Medium",
   description:
-    "Generate Medium-ready articles in your own writing style. Copy and paste into Medium with formatting preserved.",
+    "Generate or rewrite Medium-ready articles in your own writing style. Copy and paste into Medium with formatting preserved.",
+  applicationName: "Medium Writer",
+  authors: [{ name: "Medium Writer" }],
+  keywords: [
+    "medium",
+    "ai writer",
+    "article generator",
+    "medium article",
+    "rewrite article",
+    "groq",
+    "tavily",
+  ],
+  openGraph: {
+    title: "Medium Writer — AI articles that paste cleanly into Medium",
+    description:
+      "Generate or rewrite Medium-ready articles in your own writing style.",
+    type: "website",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#1a8917" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };
 
 export default function RootLayout({
