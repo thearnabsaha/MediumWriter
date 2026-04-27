@@ -3,9 +3,11 @@ import Groq from "groq-sdk";
 import { z } from "zod";
 import {
   buildMessages,
+  buildRewriteMessages,
   MAX_TOKENS,
   MODEL_FALLBACK_CHAIN,
   TEMPERATURE,
+  type ChatMessage,
   type ResearchSnippet,
 } from "@/lib/ai";
 
@@ -18,17 +20,35 @@ const ResearchSchema = z.object({
   content: z.string(),
 });
 
-const RequestSchema = z.object({
+const StyleBlocksSchema = z
+  .array(z.string().max(5000, "Each style sample must be under 5000 characters"))
+  .max(10, "Too many style samples (max 10)")
+  .default([]);
+
+const GenerateModeSchema = z.object({
+  mode: z.literal("generate").optional(),
   prompt: z
     .string()
     .min(1, "Prompt cannot be empty")
     .max(2000, "Prompt is too long (max 2000 characters)"),
-  styleBlocks: z
-    .array(z.string().max(5000, "Each style sample must be under 5000 characters"))
-    .max(10, "Too many style samples (max 10)")
-    .default([]),
+  styleBlocks: StyleBlocksSchema,
   research: z.array(ResearchSchema).max(10).optional(),
 });
+
+const RewriteModeSchema = z.object({
+  mode: z.literal("rewrite"),
+  oldArticle: z
+    .string()
+    .min(1, "Old article cannot be empty")
+    .max(20000, "Old article is too long (max 20000 characters)"),
+  templateArticle: z
+    .string()
+    .min(1, "Template article cannot be empty")
+    .max(20000, "Template article is too long (max 20000 characters)"),
+  styleBlocks: StyleBlocksSchema,
+});
+
+const RequestSchema = z.union([RewriteModeSchema, GenerateModeSchema]);
 
 /**
  * Decide whether a Groq error means we should try the next model in the chain.
@@ -118,20 +138,48 @@ export async function POST(req: NextRequest) {
 
   const parsed = RequestSchema.safeParse(body);
   if (!parsed.success) {
-    return new Response(
-      JSON.stringify({
-        error: parsed.error.issues[0]?.message ?? "Invalid request",
-      }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
+    // For our union schema, dispatch on the request's `mode` field so we surface
+    // the validation message from the matching branch (rewrite vs generate).
+    const requestedMode =
+      typeof body === "object" &&
+      body !== null &&
+      (body as { mode?: unknown }).mode === "rewrite"
+        ? "rewrite"
+        : "generate";
+
+    const branchSchema =
+      requestedMode === "rewrite" ? RewriteModeSchema : GenerateModeSchema;
+    const branchParsed = branchSchema.safeParse(body);
+    const issue = branchParsed.success
+      ? parsed.error.issues[0]
+      : branchParsed.error.issues[0];
+    const path = issue?.path?.join(".");
+    const message = issue?.message
+      ? path
+        ? `${path}: ${issue.message}`
+        : issue.message
+      : "Invalid request";
+
+    return new Response(JSON.stringify({ error: message }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  const { prompt, styleBlocks, research } = parsed.data;
-  const messages = buildMessages({
-    topic: prompt,
-    styleBlocks,
-    research: research as ResearchSnippet[] | undefined,
-  });
+  let messages: ChatMessage[];
+  if (parsed.data.mode === "rewrite") {
+    messages = buildRewriteMessages({
+      oldArticle: parsed.data.oldArticle,
+      templateArticle: parsed.data.templateArticle,
+      styleBlocks: parsed.data.styleBlocks,
+    });
+  } else {
+    messages = buildMessages({
+      topic: parsed.data.prompt,
+      styleBlocks: parsed.data.styleBlocks,
+      research: parsed.data.research as ResearchSnippet[] | undefined,
+    });
+  }
 
   const groq = new Groq({ apiKey });
   const encoder = new TextEncoder();

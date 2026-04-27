@@ -1,6 +1,6 @@
 import DarkModeToggle from "@/components/DarkModeToggle";
 import StyleBlock from "@/components/StyleBlock";
-import WriteBlock from "@/components/WriteBlock";
+import Workspace from "@/components/Workspace";
 
 export default function Home() {
   return (
@@ -27,7 +27,7 @@ export default function Home() {
       <div className="mx-auto max-w-7xl p-4 sm:p-6">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.6fr_1fr]">
           <div className="min-h-[600px]">
-            <WriteBlock />
+            <Workspace />
           </div>
           <aside className="min-h-[600px] lg:sticky lg:top-20 lg:self-start">
             <StyleBlock />

@@ -1,0 +1,158 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+
+export type ModelInfo = { id: string; label: string; index: number };
+
+export type StreamState = {
+  output: string;
+  isStreaming: boolean;
+  error: string | null;
+  activeModel: ModelInfo | null;
+  fallbackNote: string | null;
+};
+
+type StreamEvent =
+  | { type: "model"; id: string; label: string; index: number }
+  | { type: "token"; value: string }
+  | { type: "fallback"; from: string; to: string; reason: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+/**
+ * Shared hook for the NDJSON event stream emitted by /api/generate.
+ *
+ * Parses one JSON event per line, surfaces model + fallback events for the UI
+ * chip, and gives back imperative controls (run, stop, setOutput) so different
+ * components (WriteBlock, RewriteBlock) can drive the same generation pipeline
+ * without duplicating the parsing + abort + error logic.
+ */
+export function useArticleStream() {
+  const [output, setOutput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activeModel, setActiveModel] = useState<ModelInfo | null>(null);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const reset = useCallback(() => {
+    setOutput("");
+    setError(null);
+    setActiveModel(null);
+    setFallbackNote(null);
+  }, []);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const run = useCallback(
+    async (
+      body: Record<string, unknown>,
+      opts?: { onComplete?: (markdown: string) => void },
+    ): Promise<void> => {
+      if (isStreaming) return;
+      reset();
+      setIsStreaming(true);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 429) {
+            throw new Error(
+              data?.error ??
+                "All AI models are rate-limited right now. Please try again in a minute.",
+            );
+          }
+          throw new Error(data?.error ?? `Request failed (${res.status})`);
+        }
+
+        if (!res.body) {
+          throw new Error("Streaming not supported in this browser.");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        let buffer = "";
+
+        const handleLine = (line: string) => {
+          if (!line) return;
+          let event: StreamEvent;
+          try {
+            event = JSON.parse(line) as StreamEvent;
+          } catch {
+            return;
+          }
+          if (event.type === "model") {
+            setActiveModel({
+              id: event.id,
+              label: event.label,
+              index: event.index,
+            });
+          } else if (event.type === "token") {
+            acc += event.value;
+            setOutput(acc);
+          } else if (event.type === "fallback") {
+            setFallbackNote(
+              `Switched from ${event.from} to ${event.to} (${event.reason})`,
+            );
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let nlIndex: number;
+          while ((nlIndex = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, nlIndex).trim();
+            buffer = buffer.slice(nlIndex + 1);
+            handleLine(line);
+          }
+        }
+
+        if (buffer.trim()) handleLine(buffer.trim());
+
+        opts?.onComplete?.(acc);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          setError("Generation cancelled.");
+        } else {
+          setError((err as Error).message ?? "Something went wrong.");
+        }
+      } finally {
+        setIsStreaming(false);
+        abortRef.current = null;
+      }
+    },
+    [isStreaming, reset],
+  );
+
+  return {
+    output,
+    isStreaming,
+    error,
+    activeModel,
+    fallbackNote,
+    setOutput,
+    setError,
+    setFallbackNote,
+    run,
+    stop,
+    reset,
+  };
+}
