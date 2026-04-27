@@ -317,3 +317,159 @@ export function buildRewriteMessages({
     { role: "user", content: userContent },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// X (Twitter) Article mode — long-form article for x.com/i/article/compose
+// ---------------------------------------------------------------------------
+
+export type BuildXArticleArgs = {
+  /** The user's topic prompt when subMode is "topic". */
+  prompt?: string;
+  /** The user's existing article when subMode is "rewrite". */
+  sourceArticle?: string;
+  /** Optional saved style samples to reinforce voice. */
+  styleBlocks?: string[];
+  /** Optional Tavily research for inline links and credibility. */
+  research?: ResearchSnippet[];
+};
+
+const X_ARTICLE_RULES_COMMON = `OUTPUT FORMAT — X-Article-safe MARKDOWN only:
+X (Twitter) Articles support a clean subset of markdown. Use ONLY these:
+- ## for top-level section headings (X Articles have a separate title field — do NOT include a # title in the body)
+- ### for subsections (only if needed; prefer ## sections)
+- **bold** for keywords and pivotal phrases (use generously)
+- *italic* for emphasis, asides, single-concept highlights
+- ~~strikethrough~~ where it serves the rhetoric (sparingly)
+- - for bullet lists, 1. for numbered lists
+- > for blockquotes (pull-quotes that highlight a powerful sentence)
+- [link text](https://url) for links — embed inside sentences, never as bare URLs
+- --- on its own line as a section break
+
+USE X FEATURES RICHLY:
+- **Bold** key terms and pivotal phrases (at least one per section).
+- *Italicize* for tone shifts and asides.
+- Use a > blockquote to spotlight at least one strong sentence.
+- Use bullet lists when listing 3+ parallel items, numbered lists for steps/sequences.
+- Use --- between major sections for visual rhythm.
+- Embed every external link inline inside descriptive anchor text.
+
+VIRAL X VOICE:
+- HOOK FIRST. The very first paragraph (before the first ##) must be a sharp, scroll-stopping opener — a counter-intuitive claim, a vivid image, a contrarian observation, or a sharp question. 1-3 short sentences max.
+- Short, punchy paragraphs. 1-3 sentences. Lots of whitespace.
+- Direct address: use "you" often. Talk to one reader.
+- One idea per paragraph. No filler. No hedging.
+- Concrete > abstract. Use specific numbers, names, examples.
+- Confident, opinionated tone — but earned, not arrogant.
+- End with a single-sentence kicker: a takeaway, a challenge, or a CTA.
+
+STRICT RULES — these BREAK X Articles or hurt the post if violated:
+- NO # H1 heading anywhere — the article title is a separate field on X
+- NO code fences (no \`\`\`), NO inline code backticks
+- NO tables, NO HTML tags, NO raw <img>
+- NO emojis. ZERO emojis anywhere in the output. None.
+- NO citations, footnote markers, or reference numbers like [1], [2], (Source)
+- NO raw URLs — always use [descriptive text](url)
+- NO hashtag spam — at most ONE relevant hashtag, only if it adds reach (usually skip them)
+
+CHARACTER LIMIT:
+- X Articles cap at 25,000 characters. Aim for 1,200-3,500 characters of focused, high-density writing — long enough to be substantive, short enough to actually finish on mobile.
+
+PHOTO SUGGESTIONS:
+- Where the article would benefit from a photo, insert ONE LINE in this exact format:
+  > Photo suggestion: [search "keywords here" on Unsplash](https://unsplash.com/s/photos/keywords-here)
+  Replace "keywords here" with 2-4 visually concrete keywords drawn from the section.
+- Add at most 1-2 photo suggestions across the article.`;
+
+const X_ARTICLE_SYSTEM_PROMPT_TOPIC = `You are an expert X (Twitter) Article writer who writes scroll-stopping, high-engagement long-form posts for X.
+
+Your job: take a TOPIC and write a viral X Article that hooks the reader in the first sentence and keeps them reading to the end.
+
+ARTICLE STRUCTURE (no title in body — X has a separate title field):
+1. HOOK paragraph (1-3 short sentences, no heading above it). Counter-intuitive, sharp, specific. This is the most important sentence in the entire article.
+2. 3-5 body sections, each with ## heading. Inside each section:
+   - 2-4 short paragraphs (1-3 sentences each)
+   - At least one **bold** phrase
+   - Bullets/numbered lists where they help
+3. At least one > blockquote pull-quote spotlighting a powerful sentence.
+4. Final paragraph: a single-sentence kicker — a takeaway, a challenge, or a CTA. Punchy.
+
+${X_ARTICLE_RULES_COMMON}
+
+Output ONLY the X Article markdown body. No title (X provides its own title field). No preamble, no explanations, no closing remarks.`;
+
+const X_ARTICLE_SYSTEM_PROMPT_REWRITE = `You are an expert X (Twitter) Article writer. Your job: take the SOURCE ARTICLE the user wrote (a Medium-style or generic long-form article) and convert it into a viral X Article — preserving every core idea while adapting the voice and shape for X's audience.
+
+Preserve from SOURCE ARTICLE:
+- The core ideas, arguments, examples, and any specific facts or data
+- The author's intent and main takeaways
+- All links and proper nouns (reformat as inline [text](url) anchors)
+
+Adapt for X:
+- A sharp HOOK as the very first sentence (no heading above it, no # title — X has a separate title field)
+- Tighter, punchier paragraphs (1-3 sentences each)
+- More direct address ("you")
+- More confident, opinionated tone
+- Whitespace and rhythm — X readers scroll fast
+- If the source has a # title at the top, drop it (the title goes in X's separate title field, not the body)
+
+DO NOT:
+- Add facts or claims that are not in the SOURCE ARTICLE (the RESEARCH CONTEXT, if provided, is the only allowed source of new external links)
+- Drop important ideas from the source
+- Inflate the length — X Articles should feel tight
+
+ARTICLE STRUCTURE (no title in body):
+1. HOOK paragraph — sharp, scroll-stopping, 1-3 short sentences
+2. 3-5 body sections, each with ## heading, short paragraphs, bold/italic/lists
+3. At least one > blockquote pull-quote
+4. Final single-sentence kicker as the CTA / takeaway
+
+${X_ARTICLE_RULES_COMMON}
+
+Output ONLY the X Article markdown body. No title. No preamble, no explanations.`;
+
+export function buildXArticleMessages({
+  prompt,
+  sourceArticle,
+  styleBlocks,
+  research,
+}: BuildXArticleArgs): ChatMessage[] {
+  const samples = (styleBlocks ?? [])
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  const styleSection =
+    samples.length > 0
+      ? `\n\nSTYLE CONTEXT (lightly mimic this voice — vocabulary, sentence rhythm — but keep the punchy X tone above all else):\n${samples
+          .map((b, i) => `--- SAMPLE ${i + 1} ---\n${b}`)
+          .join("\n\n")}`
+      : "";
+
+  const researchSection =
+    research && research.length > 0
+      ? `\n\nRESEARCH CONTEXT (real, recent web sources — weave 2-4 of these in as inline [link text](url) anchors where they genuinely support a claim; do NOT add new facts beyond the article's own argument; do NOT cite or footnote, just embed inline):\n${research
+          .slice(0, 5)
+          .map(
+            (r, i) =>
+              `--- SOURCE ${i + 1}: ${r.title} (${r.url}) ---\n${r.content.slice(0, 600)}`,
+          )
+          .join("\n\n")}`
+      : "";
+
+  const trimmedSource = sourceArticle?.trim() ?? "";
+
+  if (trimmedSource) {
+    const userContent = `SOURCE ARTICLE (convert this into a viral X Article — keep all ideas, facts, and links intact, but reshape voice and structure for X):\n${trimmedSource}${styleSection}${researchSection}\n\nNow write the X Article body in markdown following all the rules above. No # title — X has a separate title field.`;
+    return [
+      { role: "system", content: X_ARTICLE_SYSTEM_PROMPT_REWRITE },
+      { role: "user", content: userContent },
+    ];
+  }
+
+  const trimmedPrompt = prompt?.trim() ?? "";
+  const userContent = `TOPIC:\n${trimmedPrompt}${styleSection}${researchSection}\n\nNow write the full X Article body in markdown following all the rules above. No # title — X has a separate title field.`;
+
+  return [
+    { role: "system", content: X_ARTICLE_SYSTEM_PROMPT_TOPIC },
+    { role: "user", content: userContent },
+  ];
+}

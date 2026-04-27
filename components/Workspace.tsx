@@ -1,24 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { PenLine, Wand2 } from "lucide-react";
+import { PenLine, Twitter, Wand2 } from "lucide-react";
 import WriteBlock from "./WriteBlock";
 import RewriteBlock from "./RewriteBlock";
+import XArticleBlock from "./XArticleBlock";
 
-type Mode = "generate" | "rewrite";
+type Mode = "generate" | "rewrite" | "x";
 
-const TABS: Array<{ id: Mode; label: string; icon: React.ReactNode; hint: string }> = [
+const TABS: Array<{
+  id: Mode;
+  label: string;
+  icon: React.ReactNode;
+  hint: string;
+}> = [
   {
     id: "generate",
     label: "Generate from topic",
     icon: <PenLine size={14} />,
-    hint: "Start with a topic prompt",
+    hint: "Start with a topic prompt — Medium-ready output",
   },
   {
     id: "rewrite",
     label: "Rewrite from article",
     icon: <Wand2 size={14} />,
     hint: "Reshape an existing article in a template's style",
+  },
+  {
+    id: "x",
+    label: "X Article",
+    icon: <Twitter size={14} />,
+    hint: "Write a viral long-form X (Twitter) Article — from a topic or by converting an existing article",
   },
 ];
 
@@ -30,7 +42,7 @@ export default function Workspace() {
       <nav
         role="tablist"
         aria-label="Writing mode"
-        className="inline-flex w-fit gap-1 self-start rounded-full border border-neutral-200 bg-white p-1 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+        className="inline-flex w-fit flex-wrap gap-1 self-start rounded-full border border-neutral-200 bg-white p-1 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
       >
         {TABS.map((t) => {
           const active = mode === t.id;
@@ -56,7 +68,9 @@ export default function Workspace() {
       </nav>
 
       <div className="flex-1">
-        {mode === "generate" ? <WriteBlock /> : <RewriteBlock />}
+        {mode === "generate" && <WriteBlock />}
+        {mode === "rewrite" && <RewriteBlock />}
+        {mode === "x" && <XArticleBlock />}
       </div>
     </div>
   );

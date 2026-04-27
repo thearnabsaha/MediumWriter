@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   buildMessages,
   buildRewriteMessages,
+  buildXArticleMessages,
   MAX_TOKENS,
   MODEL_FALLBACK_CHAIN,
   TEMPERATURE,
@@ -54,7 +55,42 @@ const RewriteModeSchema = z.object({
   autoResearch: z.boolean().optional(),
 });
 
-const RequestSchema = z.union([RewriteModeSchema, GenerateModeSchema]);
+const XArticleModeSchema = z
+  .object({
+    mode: z.literal("x"),
+    /** Sub-mode: "topic" writes from a prompt, "rewrite" converts an article. */
+    subMode: z.enum(["topic", "rewrite"]),
+    prompt: z
+      .string()
+      .max(2000, "Prompt is too long (max 2000 characters)")
+      .optional(),
+    sourceArticle: z
+      .string()
+      .max(20000, "Source article is too long (max 20000 characters)")
+      .optional(),
+    styleBlocks: StyleBlocksSchema,
+    research: z.array(ResearchSchema).max(10).optional(),
+    autoResearch: z.boolean().optional(),
+  })
+  .refine(
+    (v) =>
+      v.subMode === "topic"
+        ? !!v.prompt && v.prompt.trim().length > 0
+        : !!v.sourceArticle && v.sourceArticle.trim().length > 0,
+    (v) => ({
+      message:
+        v.subMode === "topic"
+          ? "prompt is required when subMode is 'topic'"
+          : "sourceArticle is required when subMode is 'rewrite'",
+      path: v.subMode === "topic" ? ["prompt"] : ["sourceArticle"],
+    }),
+  );
+
+const RequestSchema = z.union([
+  XArticleModeSchema,
+  RewriteModeSchema,
+  GenerateModeSchema,
+]);
 
 /**
  * Decide whether a Groq error means we should try the next model in the chain.
@@ -167,16 +203,20 @@ export async function POST(req: NextRequest) {
   const parsed = RequestSchema.safeParse(body);
   if (!parsed.success) {
     // For our union schema, dispatch on the request's `mode` field so we surface
-    // the validation message from the matching branch (rewrite vs generate).
+    // the validation message from the matching branch (rewrite vs generate vs x).
+    const rawMode =
+      typeof body === "object" && body !== null
+        ? (body as { mode?: unknown }).mode
+        : undefined;
     const requestedMode =
-      typeof body === "object" &&
-      body !== null &&
-      (body as { mode?: unknown }).mode === "rewrite"
-        ? "rewrite"
-        : "generate";
+      rawMode === "rewrite" ? "rewrite" : rawMode === "x" ? "x" : "generate";
 
     const branchSchema =
-      requestedMode === "rewrite" ? RewriteModeSchema : GenerateModeSchema;
+      requestedMode === "rewrite"
+        ? RewriteModeSchema
+        : requestedMode === "x"
+          ? XArticleModeSchema
+          : GenerateModeSchema;
     const branchParsed = branchSchema.safeParse(body);
     const issue = branchParsed.success
       ? parsed.error.issues[0]
@@ -233,6 +273,48 @@ export async function POST(req: NextRequest) {
       templateArticle: parsed.data.templateArticle,
       styleBlocks: parsed.data.styleBlocks,
       research: rewriteResearch,
+    });
+  } else if (parsed.data.mode === "x") {
+    let xResearch: ResearchSnippet[] | undefined =
+      parsed.data.research as ResearchSnippet[] | undefined;
+
+    // Auto-research for X mode: derive a query from either the source article
+    // (rewrite sub-mode) or the topic prompt (topic sub-mode), then enrich with
+    // up to 5 Tavily results. Failures are non-fatal.
+    if (
+      parsed.data.autoResearch &&
+      (!xResearch || xResearch.length === 0) &&
+      process.env.TAVILY_API_KEY
+    ) {
+      try {
+        const seed =
+          parsed.data.subMode === "rewrite"
+            ? (parsed.data.sourceArticle ?? "")
+            : (parsed.data.prompt ?? "");
+        const query = deriveResearchQuery(seed);
+        if (query) {
+          const tavily = await tavilySearch({
+            query,
+            maxResults: 5,
+            searchDepth: "advanced",
+            includeAnswer: false,
+          });
+          xResearch = tavily.results.map((r) => ({
+            title: r.title,
+            url: r.url,
+            content: r.content,
+          }));
+        }
+      } catch {
+        // intentionally non-fatal
+      }
+    }
+
+    messages = buildXArticleMessages({
+      prompt: parsed.data.prompt,
+      sourceArticle: parsed.data.sourceArticle,
+      styleBlocks: parsed.data.styleBlocks,
+      research: xResearch,
     });
   } else {
     messages = buildMessages({

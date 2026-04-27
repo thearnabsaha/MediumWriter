@@ -1,6 +1,6 @@
 # Medium Writer
 
-An AI-powered web app that generates Medium-ready articles in your personal writing style. Built with Next.js 14 (App Router), TypeScript, Tailwind CSS, Groq's GPT-OSS model family, and Tavily web research.
+An AI-powered web app that generates **Medium-ready articles** AND **viral X (Twitter) Articles** in your personal writing style. Built with Next.js 14 (App Router), TypeScript, Tailwind CSS, Groq's GPT-OSS model family, and Tavily web research.
 
 ## What makes it Medium-ready
 
@@ -15,15 +15,22 @@ When you click **Copy to Medium**, the clipboard receives both `text/html` (clea
 
 ## Features
 
-### Two writing modes (tabs at the top)
+### Three writing modes (tabs at the top)
 
-- **Generate from topic** — enter a prompt, optionally enable Tavily research, watch the article stream in.
+- **Generate from topic** — enter a prompt, optionally enable Tavily research, watch the article stream in. Output is **Medium-ready**.
 - **Rewrite from article** — paste an existing article and pick a template:
   - **No template** — keeps your own voice, just polishes for Medium (tightens sentences, adds structure, bold/italic/blockquotes/lists).
   - **Saved sample** — rewrites in the voice of one of your saved Style Blocks.
   - **Paste new** — paste any reference article and rewrite in its style.
   - **Auto-enrich with Tavily** (on by default) — finds real recent web links and weaves them inline.
   - **Word-count parity** — the rewrite stays within ±15% of your source's length, with a live "matches source length" badge in the preview.
+- **X Article** — write a viral long-form post for [X.com Articles](https://x.com/i/article/compose). Two sub-modes:
+  - **From topic** — sharp hook, punchy paragraphs, Medium-style polish but tuned for X's scrolling reader.
+  - **From article** — paste any long-form article and convert it into an X Article that keeps every idea, fact, and link, but reshapes voice and rhythm.
+  - **Auto-enrich with Tavily** (on by default) — pulls in real, recent web sources and weaves them in as inline anchors.
+  - **X-Article-safe formatting** — uses only the tags X's editor preserves: `## H2`, `### H3`, `#### H4`, `**bold**`, `*italic*`, `~~strike~~`, lists, blockquotes, links, `---` rules. **No `# H1` in the body** (X has a separate title field).
+  - **Live character meter** — shows characters used vs. X's 25,000-char limit, plus a "within limit / short / over" badge.
+  - **Copy to X** + **Open X compose** — one-click clipboard copy (HTML + plain) plus a button that opens [x.com/i/article/compose](https://x.com/i/article/compose) in a new tab so you can paste immediately.
 
 ### Medium features used in every output
 
@@ -143,9 +150,9 @@ If the **first** call to every model fails before any tokens stream, the route r
 
 ### `POST /api/generate`
 
-Streams Medium-safe Markdown using a JSON-line (NDJSON) wire format. Two modes via the `mode` field.
+Streams Medium-safe (or X-Article-safe) Markdown using a JSON-line (NDJSON) wire format. Three modes via the `mode` field.
 
-**Generate mode:**
+**Generate mode (Medium):**
 
 ```json
 {
@@ -156,7 +163,7 @@ Streams Medium-safe Markdown using a JSON-line (NDJSON) wire format. Two modes v
 }
 ```
 
-**Rewrite mode:**
+**Rewrite mode (Medium):**
 
 ```json
 {
@@ -169,7 +176,21 @@ Streams Medium-safe Markdown using a JSON-line (NDJSON) wire format. Two modes v
 }
 ```
 
-When `autoResearch` is `true` and no `research` is supplied, the route runs a server-side Tavily search using a query derived from the old article and feeds the results into the prompt as `RESEARCH CONTEXT`. Tavily failures are non-fatal — the rewrite proceeds without extra links.
+**X Article mode:**
+
+```json
+{
+  "mode": "x",
+  "subMode": "topic | rewrite",
+  "prompt": "string (required when subMode is 'topic', max 2000 chars)",
+  "sourceArticle": "string (required when subMode is 'rewrite', max 20000 chars)",
+  "styleBlocks": ["string (max 5000 chars each)"],
+  "autoResearch": true,
+  "research": [{ "title": "...", "url": "...", "content": "..." }]
+}
+```
+
+When `autoResearch` is `true` and no `research` is supplied, the route runs a server-side Tavily search using a query derived from the old article (rewrite/x-rewrite) or the prompt (x-topic) and feeds the results into the prompt as `RESEARCH CONTEXT`. Tavily failures are non-fatal — generation proceeds without extra links.
 
 Response: `application/x-ndjson; charset=utf-8` with one event per line:
 
@@ -210,20 +231,21 @@ Returns:
 
 ```
 app/
-  api/generate/route.ts   # streaming Groq endpoint, generate + rewrite modes, fallback chain
+  api/generate/route.ts   # streaming Groq endpoint, generate + rewrite + x modes, fallback chain
   api/research/route.ts   # Tavily web search endpoint
   icon.svg                # favicon (32x32 / 64x64 SVG)
-  apple-icon.svg          # iOS home-screen icon
+  apple-icon.tsx          # iOS home-screen icon (dynamic 180x180 PNG via next/og)
   layout.tsx              # fonts, dark-mode wrapper, metadata
   page.tsx                # two-column layout
   globals.css             # Medium-style typography
 components/
-  Workspace.tsx           # tabbed container (Generate vs Rewrite)
+  Workspace.tsx           # tabbed container (Generate / Rewrite / X Article)
   WriteBlock.tsx          # generate-mode UI, research toggle
   RewriteBlock.tsx        # rewrite-mode UI, template selector, auto-research, word-count meter
+  XArticleBlock.tsx       # X-Article UI, sub-mode toggle, char meter, auto-research
   GenerationStatus.tsx    # model chip + fallback note + research status
   StyleBlock.tsx
-  OutputPreview.tsx
+  OutputPreview.tsx       # target-aware preview (medium | x), Copy + Open compose
   DarkModeToggle.tsx
   Spinner.tsx
 lib/
@@ -231,7 +253,9 @@ lib/
   useArticleStream.ts     # NDJSON parser hook + emoji stripper
   styleProcessor.ts       # heuristic style summary
   markdownToMediumHtml.ts # Medium-safe HTML converter
+  markdownToXHtml.ts      # X-Article-safe HTML converter
   copyToMedium.ts         # clipboard with text/html + text/plain
+  copyToX.ts              # X-Article clipboard + open-compose helper
   store.ts                # Zustand + localStorage
   tavily.ts               # Tavily search wrapper
 vercel.json               # function maxDuration overrides
