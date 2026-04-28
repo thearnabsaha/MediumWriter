@@ -473,3 +473,84 @@ export function buildXArticleMessages({
     { role: "user", content: userContent },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Translation mode — turn an existing Medium / X article into German
+// ---------------------------------------------------------------------------
+
+export type TranslateTarget = "medium" | "x";
+
+export type BuildTranslateArgs = {
+  /** The English markdown article to translate. */
+  markdown: string;
+  /** Where the translation will be pasted — affects the allowed Markdown subset. */
+  target: TranslateTarget;
+};
+
+const TRANSLATE_RULES_COMMON = `STRICT RULES:
+- Output ONLY the translated markdown. No preamble, no explanations, no notes, no "Here is the translation".
+- PRESERVE the markdown structure 1-for-1: every heading stays a heading at the same level, every list item stays a list item, every blockquote stays a blockquote, every horizontal rule (---) stays.
+- PRESERVE bold (**text**), italic (*text*), and strikethrough (~~text~~) on the SAME phrases — translate the inner words but keep the markers around the equivalent German phrase.
+- PRESERVE every link's URL exactly. Translate ONLY the visible link text inside [ ]. Example: [my new book](https://example.com/book) → [mein neues Buch](https://example.com/book).
+- PRESERVE every "Photo suggestion:" line literally as-is — keep the English keyword search inside the Unsplash URL (Unsplash works better with English keywords). Translate only the prose label "Photo suggestion" to "Foto-Vorschlag" if you wish, but the search keywords inside the URL stay in English.
+- PRESERVE proper nouns (people, brands, products, place names) and acronyms exactly. Do NOT translate them.
+- PRESERVE numbers, dates, and statistics exactly.
+- PRESERVE inline placeholders like [Add your link here] — translate to [Füge hier deinen Link ein] but keep the square brackets.
+
+GERMAN STYLE:
+- Use natural, idiomatic German that a native speaker would write — not literal word-for-word translation.
+- Use the informal "du" form throughout (this is the conversational register Medium and X readers expect).
+- Keep sentences punchy. If the English uses short, sharp sentences, the German should too.
+- Use German typographic conventions: „Anführungszeichen" instead of "double quotes" where dialogue or direct quotes appear, German number formatting (12.345,67 only when actually formatting numbers — leave clean numerals like 2026 alone).
+- Translate idioms to their natural German equivalent rather than literally. "Hit the ground running" → "voll durchstarten", not "den Boden rennend treffen".
+
+ZERO EMOJIS. None. The translated output must contain no emoji glyphs even if the source somehow does.`;
+
+const TRANSLATE_SYSTEM_PROMPT_MEDIUM = `You are an expert German translator specializing in Medium articles. Your job: translate the given English Medium article into natural, idiomatic German while preserving Medium's exact markdown formatting.
+
+Allowed markdown elements (Medium's editor accepts only these):
+- # for the title (keep exactly ONE # title at the top)
+- ## for section headings (NEVER use ### or deeper)
+- **bold**, *italic*
+- - for bullets, 1. for numbered lists
+- > for blockquotes
+- [text](url) for links
+- --- for section breaks
+
+${TRANSLATE_RULES_COMMON}
+
+Output ONLY the German Medium article in markdown.`;
+
+const TRANSLATE_SYSTEM_PROMPT_X = `You are an expert German translator specializing in X (Twitter) Articles. Your job: translate the given English X Article into natural, idiomatic German while preserving X's exact markdown formatting.
+
+Allowed markdown elements:
+- ## for top-level section headings (X Articles have a separate title field — do NOT add a # title in the body, and if the English source has a # title at the top, demote it to ## or drop it)
+- ### / #### for subsections (only if the source uses them)
+- **bold**, *italic*, ~~strikethrough~~
+- - for bullets, 1. for numbered lists
+- > for blockquotes
+- [text](url) for links
+- --- for section breaks
+
+${TRANSLATE_RULES_COMMON}
+
+Output ONLY the German X Article in markdown.`;
+
+export function buildTranslateMessages({
+  markdown,
+  target,
+}: BuildTranslateArgs): ChatMessage[] {
+  const systemPrompt =
+    target === "x"
+      ? TRANSLATE_SYSTEM_PROMPT_X
+      : TRANSLATE_SYSTEM_PROMPT_MEDIUM;
+
+  const userContent = `Translate the following ${
+    target === "x" ? "X Article" : "Medium article"
+  } into natural, idiomatic German. Follow every rule above.\n\n--- ENGLISH ARTICLE ---\n${markdown.trim()}\n--- END ENGLISH ARTICLE ---\n\nNow output the full German translation as markdown only. No commentary.`;
+
+  return [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userContent },
+  ];
+}

@@ -36,14 +36,15 @@ type StreamEvent =
   | { type: "error"; message: string };
 
 /**
- * Shared hook for the NDJSON event stream emitted by /api/generate.
+ * Shared hook for the NDJSON event stream emitted by /api/generate and
+ * /api/translate (any endpoint that follows our `{type, ...}` line protocol).
  *
  * Parses one JSON event per line, surfaces model + fallback events for the UI
  * chip, and gives back imperative controls (run, stop, setOutput) so different
- * components (WriteBlock, RewriteBlock) can drive the same generation pipeline
- * without duplicating the parsing + abort + error logic.
+ * components (WriteBlock, RewriteBlock, OutputPreview translate) can drive the
+ * same streaming pipeline without duplicating parse + abort + error logic.
  */
-export function useArticleStream() {
+export function useArticleStream(endpoint: string = "/api/generate") {
   const [output, setOutput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +76,7 @@ export function useArticleStream() {
       abortRef.current = controller;
 
       try {
-        const res = await fetch("/api/generate", {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -161,7 +162,7 @@ export function useArticleStream() {
         abortRef.current = null;
       }
     },
-    [isStreaming, reset],
+    [endpoint, isStreaming, reset],
   );
 
   return {

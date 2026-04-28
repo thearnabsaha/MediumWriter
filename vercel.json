@@ -4,6 +4,9 @@
     "app/api/generate/route.ts": {
       "maxDuration": 60
     },
+    "app/api/translate/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/research/route.ts": {
       "maxDuration": 30
     }

@@ -57,13 +57,26 @@ The system prompt instructs the model to use Medium's full formatting toolbox:
 
   If all three are rate-limited or unavailable, the app returns a clean **429** with a friendly retry message. Mid-stream fallbacks are also surfaced as a toast.
 
+### Translate to German
+
+Every article — Medium or X, generated or rewritten — gets a **Translate to German** button right above the preview.
+
+- **One-click streaming translation** via the same Groq fallback chain (`openai/gpt-oss-120b` → `20b` → `safeguard-20b`).
+- **Markdown structure preserved 1-for-1** — every heading, bullet, blockquote, bold/italic/strikethrough span, photo-suggestion line, and `[text](url)` link is kept; only the visible text is translated.
+- **Link URLs untouched, anchor text translated** — `[my new book](https://example.com/book)` → `[mein neues Buch](https://example.com/book)`.
+- **Idiomatic, conversational `du`-form German** — not literal word-for-word translation. Idioms get their natural German equivalents.
+- **Target-aware whitelist** — Medium translations stay Medium-safe (`# / ##` only); X translations stay X-safe (`## / ### / ####` and no `# H1` in body).
+- **Toggle freely** — once translated, switch back to **Show English** without burning more tokens. Hit **Re-translate** for a fresh pass.
+- **Copy / Export reflect the displayed language** — the buttons say "Copy German to Medium / X" and "Export .md (DE)" when German is shown, with `-de.md` suffix on downloads.
+- **Zero emojis** in German output too (same defense-in-depth: prompt rule + client-side stripping).
+
 ### Other niceties
 
 - **Style Block** — save up to 5 of your previous writing samples. The AI mimics your tone, sentence length, and vocabulary in both modes.
 - **Sexy SVG favicon** — gradient "M" mark with green accent, light/dark friendly.
 - **Medium-style preview** — serif typography, generous line-height, max-width prose.
-- **Copy to Medium** — one-click clipboard copy with formatting preserved (`text/html` + `text/plain`).
-- **Inline edit** — toggle edit mode to tweak the output before copying.
+- **Copy to Medium / Copy to X** — one-click clipboard copy with formatting preserved (`text/html` + `text/plain`).
+- **Inline edit** — toggle edit mode to tweak the output before copying (English only — translation re-runs from the latest English source).
 - **Export as Markdown** — download the raw `.md` file.
 - **Regenerate / Rewrite again** — try a different take.
 - **Dark mode** — toggle in the header.
@@ -113,6 +126,7 @@ This app is fully Vercel-compatible.
 The included [vercel.json](vercel.json) raises the function timeout for the streaming routes:
 
 - `/api/generate` — 60s (long-form streaming)
+- `/api/translate` — 60s (long-form streaming)
 - `/api/research` — 30s
 
 > Note: the 60s `maxDuration` requires a Pro plan. On Hobby, drop it to 10s in `vercel.json` — generation still works but very long articles may be cut off near the end.
@@ -204,6 +218,35 @@ Response: `application/x-ndjson; charset=utf-8` with one event per line:
 {"type":"done"}
 ```
 
+### `POST /api/translate`
+
+Translates a Medium or X Article into German. Streams NDJSON in the same wire format as `/api/generate` (so the client reuses `useArticleStream`). Uses the same Groq fallback chain — returns HTTP 429 with `details` if every model is exhausted, surfaces mid-stream model fallbacks as `fallback` events.
+
+```json
+{
+  "markdown": "string (1-40000 chars) — the English markdown article",
+  "target": "medium | x"
+}
+```
+
+Response is `application/x-ndjson; charset=utf-8`, one event per line:
+
+```
+{"type":"model","id":"openai/gpt-oss-120b","label":"GPT-OSS 120B","index":0}
+{"type":"token","value":"# "}
+{"type":"token","value":"Warum "}
+...
+{"type":"done"}
+```
+
+The system prompt enforces:
+
+- 1-for-1 markdown structure preservation (headings, lists, blockquotes, bold/italic/strike, links, `---`).
+- Link URLs unchanged; only `[anchor text]` is translated.
+- "Photo suggestion:" lines preserved; the Unsplash search keywords inside the URL stay in English.
+- Idiomatic `du`-form German, German typographic conventions, no literal word-for-word translation.
+- Zero emojis (same client-side strip applied as defense in depth).
+
 ### `POST /api/research`
 
 Runs a Tavily web search.
@@ -232,6 +275,7 @@ Returns:
 ```
 app/
   api/generate/route.ts   # streaming Groq endpoint, generate + rewrite + x modes, fallback chain
+  api/translate/route.ts  # streaming Groq endpoint for English -> German translation
   api/research/route.ts   # Tavily web search endpoint
   icon.svg                # favicon (32x32 / 64x64 SVG)
   apple-icon.tsx          # iOS home-screen icon (dynamic 180x180 PNG via next/og)
@@ -245,12 +289,13 @@ components/
   XArticleBlock.tsx       # X-Article UI, sub-mode toggle, char meter, auto-research
   GenerationStatus.tsx    # model chip + fallback note + research status
   StyleBlock.tsx
-  OutputPreview.tsx       # target-aware preview (medium | x), Copy + Open compose
+  OutputPreview.tsx       # target-aware preview, Copy + Open compose, Translate-to-German toggle
   DarkModeToggle.tsx
   Spinner.tsx
 lib/
-  ai.ts                   # MODEL_FALLBACK_CHAIN + prompt builders + word-count helper
-  useArticleStream.ts     # NDJSON parser hook + emoji stripper
+  ai.ts                   # MODEL_FALLBACK_CHAIN + prompt builders (generate/rewrite/x/translate)
+  groqStream.ts           # shared Groq fallback streaming + retry detector + NDJSON encoder
+  useArticleStream.ts     # NDJSON parser hook + emoji stripper, configurable endpoint
   styleProcessor.ts       # heuristic style summary
   markdownToMediumHtml.ts # Medium-safe HTML converter
   markdownToXHtml.ts      # X-Article-safe HTML converter
