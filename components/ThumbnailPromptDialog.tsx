@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   Clipboard,
   Image as ImageIcon,
   Loader2,
+  Palette,
   RefreshCw,
   Sparkles,
   X,
 } from "lucide-react";
 import { useArticleStream } from "@/lib/useArticleStream";
+import {
+  THUMBNAIL_STYLE_LABELS,
+  type ThumbnailStyle,
+} from "@/lib/ai";
 
 export type ThumbnailTarget = "medium" | "x";
 
@@ -20,6 +25,39 @@ type Props = {
   markdown: string;
   target: ThumbnailTarget;
 };
+
+const STYLE_OPTIONS: Array<{ id: ThumbnailStyle; label: string; hint: string }> = [
+  {
+    id: "auto",
+    label: THUMBNAIL_STYLE_LABELS.auto,
+    hint: "Read the article and pick the best-fitting style family",
+  },
+  {
+    id: "scrapbook-collage",
+    label: THUMBNAIL_STYLE_LABELS["scrapbook-collage"],
+    hint: "Torn paper texture, hand-drawn ink-and-watercolor character, sticker icons, mock screenshots — Karpathy / sketchbook editorial",
+  },
+  {
+    id: "editorial-flatlay",
+    label: THUMBNAIL_STYLE_LABELS["editorial-flatlay"],
+    hint: "Cream-on-charcoal, row of solid navy circular icon-stamps, premium publication feel — Stripe Press / Linear",
+  },
+  {
+    id: "dark-diagram",
+    label: THUMBNAIL_STYLE_LABELS["dark-diagram"],
+    hint: "Pitch-black background, glassy panels connected by hand-drawn arrows, single accent color — Excalidraw whiteboard",
+  },
+  {
+    id: "cinematic-character",
+    label: THUMBNAIL_STYLE_LABELS["cinematic-character"],
+    hint: "Pitch-black void, single 3D / photoreal character offset right, massive empty space left — viral X / TikTok header",
+  },
+  {
+    id: "halftone-classical",
+    label: THUMBNAIL_STYLE_LABELS["halftone-classical"],
+    hint: "Flat saturated background, classical bust / engraving in halftone, one bold accent shape — Higgsfield / magazine zine",
+  },
+];
 
 const SPECS: Record<ThumbnailTarget, {
   label: string;
@@ -62,33 +100,50 @@ export default function ThumbnailPromptDialog({
   const stream = useArticleStream("/api/thumbnail");
   const [copied, setCopied] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [style, setStyle] = useState<ThumbnailStyle>("auto");
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
-  const lastSourceRef = useRef<{ markdown: string; target: ThumbnailTarget } | null>(
-    null,
-  );
+  const lastSourceRef = useRef<{
+    markdown: string;
+    target: ThumbnailTarget;
+    style: ThumbnailStyle;
+  } | null>(null);
 
   const spec = SPECS[target];
 
-  // Auto-generate the first time the dialog opens for a given (markdown, target)
-  // pair. Re-opening for the same pair shows the cached prompt without burning
-  // tokens; user can hit "Regenerate" for a fresh take.
+  const runForStyle = useCallback(
+    (nextStyle: ThumbnailStyle) => {
+      if (!markdown.trim()) return;
+      lastSourceRef.current = { markdown, target, style: nextStyle };
+      setHasGenerated(false);
+      stream.reset();
+      stream
+        .run({ markdown: markdown.trim(), target, style: nextStyle })
+        .then(() => setHasGenerated(true));
+    },
+    // stream.run / stream.reset are stable identities from useArticleStream.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [markdown, target],
+  );
+
+  // Auto-generate when the dialog opens for a fresh (markdown, target, style)
+  // tuple. Re-opening for the same tuple shows the cached prompt without
+  // burning tokens; user hits Regenerate or changes the style for a new pass.
   useEffect(() => {
     if (!open) return;
     const last = lastSourceRef.current;
-    const isFresh = !last || last.markdown !== markdown || last.target !== target;
+    const isFresh =
+      !last ||
+      last.markdown !== markdown ||
+      last.target !== target ||
+      last.style !== style;
     if (isFresh && markdown.trim()) {
-      lastSourceRef.current = { markdown, target };
-      setHasGenerated(false);
-      stream.reset();
-      stream.run({ markdown: markdown.trim(), target }).then(() => {
-        setHasGenerated(true);
-      });
+      runForStyle(style);
     } else if (!isFresh) {
       setHasGenerated(true);
     }
-    // We intentionally only re-run when `open` flips on for a fresh pair.
+    // We intentionally only react to opens or to (markdown/target/style) flips.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, markdown, target]);
+  }, [open, markdown, target, style]);
 
   // Focus the close button when the dialog opens — keeps keyboard focus
   // trapped enough for an Escape-to-close UX without a full focus-trap library.
@@ -129,17 +184,26 @@ export default function ThumbnailPromptDialog({
 
   const handleRegenerate = () => {
     if (stream.isStreaming || !markdown.trim()) return;
-    lastSourceRef.current = { markdown, target };
-    setHasGenerated(false);
-    stream.run({ markdown: markdown.trim(), target }).then(() => {
-      setHasGenerated(true);
-    });
+    runForStyle(style);
+  };
+
+  const handleStyleChange = (nextStyle: ThumbnailStyle) => {
+    if (stream.isStreaming || nextStyle === style) {
+      setStyle(nextStyle);
+      return;
+    }
+    setStyle(nextStyle);
+    // The effect on (style) will trigger a regenerate automatically when the
+    // dialog is open and the tuple changes.
   };
 
   const handleClose = () => {
     if (stream.isStreaming) stream.stop();
     onClose();
   };
+
+  const activeStyleHint =
+    STYLE_OPTIONS.find((o) => o.id === style)?.hint ?? "";
 
   return (
     <div
@@ -182,6 +246,32 @@ export default function ThumbnailPromptDialog({
         <div className="flex flex-col gap-3 overflow-y-auto px-5 py-4">
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
             <strong>Safe-area note:</strong> {spec.cropNote}
+          </div>
+
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-700 dark:bg-neutral-950">
+            <label
+              htmlFor="thumb-style-select"
+              className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted dark:text-neutral-400"
+            >
+              <Palette size={12} className="text-violet-500" />
+              Visual style
+            </label>
+            <select
+              id="thumb-style-select"
+              value={style}
+              onChange={(e) => handleStyleChange(e.target.value as ThumbnailStyle)}
+              disabled={stream.isStreaming}
+              className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+            >
+              {STYLE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-ink-muted dark:text-neutral-500">
+              {activeStyleHint}
+            </p>
           </div>
 
           {stream.activeModel && stream.isStreaming && (

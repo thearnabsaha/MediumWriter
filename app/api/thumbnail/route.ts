@@ -19,6 +19,20 @@ const RequestSchema = z.object({
     .max(40000, "Markdown is too long (max 40000 characters)"),
   /** Where the thumbnail will be used — drives aspect ratio + safe-area. */
   target: z.enum(["medium", "x"]),
+  /**
+   * Optional locked visual style. When omitted or "auto", the AI picks the
+   * style family that best fits the article.
+   */
+  style: z
+    .enum([
+      "auto",
+      "scrapbook-collage",
+      "editorial-flatlay",
+      "dark-diagram",
+      "cinematic-character",
+      "halftone-classical",
+    ])
+    .optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -60,6 +74,7 @@ export async function POST(req: NextRequest) {
   const messages = buildThumbnailPromptMessages({
     markdown: parsed.data.markdown,
     target: parsed.data.target,
+    style: parsed.data.style,
   });
 
   const groq = new Groq({ apiKey });

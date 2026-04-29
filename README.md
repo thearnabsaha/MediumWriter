@@ -59,16 +59,34 @@ The system prompt instructs the model to use Medium's full formatting toolbox:
 
 ### Thumbnail prompt (for ChatGPT image generation)
 
-Every article — Medium or X — gets a **Thumbnail prompt** button on the preview pane. Click it to stream a tightly-crafted, target-aware ChatGPT image prompt you can paste straight into ChatGPT's image generator (or DALL·E / GPT-Image / similar).
+Every article — Medium or X — gets a **Thumbnail prompt** button on the preview pane. Click it to stream a tightly-crafted, target-aware ChatGPT image prompt you can paste straight into ChatGPT's image generator (or DALL·E / GPT-Image / similar). The prompts are tuned to match real high-engagement X / Medium thumbnail styles, not generic AI slop.
 
-- **Target-aware aspect ratios**:
-  - **Medium cover** — 16:9 at 1400×788 px (Medium's recommended size). The prompt explicitly demands the focal subject sits in the central third with **15-20% safe-area padding on every side** so the image survives Medium's aggressive cropping into homepage / social / mobile thumbnails.
-  - **X Article header** — 5:2 at 3840×1536 px (4K). The prompt demands **18-22% safe-area padding on the left and right** because the ultra-wide format gets cropped tighter than 16:9 in feed cards.
-- **Six-slot prompt anatomy** — every prompt covers Subject, Style, Lighting, Composition, Mood/Color, and Technical, in natural prose. 80-160 words. No labels, no quotes, no commentary — just the prompt text.
-- **Negative clause baked in** — every prompt ends with "no text, no typography, no logos, no watermarks, no UI overlays, no captions" so the generated image stays clean.
+#### Five reference style families
+
+The model picks ONE family per generation and locks to it (no mix-and-match). You can either let the AI pick (`Auto`) or lock the dropdown to a specific family. Reference images live in [`public/thumbnail-refs/`](public/thumbnail-refs/):
+
+1. **Scrapbook collage** — torn off-white paper texture as the canvas, hand-drawn ink-and-watercolor cartoon character at the focal center, scattered "pinned" reference elements (mock screenshots, sticker icons, hand-drawn arrows, lightbulbs, brain icons). Casual sketchbook palette with denim blue / ochre / slate watercolor washes. Karpathy-style.
+2. **Editorial flat-lay** — clean off-white or warm-cream solid background, tight horizontal row of solid navy circular icon-stamps with monoline white icons, premium "product launch" feel. Stripe Press / Linear vibe.
+3. **Dark diagrammatic UI** — pitch-black background, hand-drawn whiteboard-style diagram of glassy translucent panels connected by wobbly white arrows, single saturated accent color (deep purple / emerald / coral) on the focal panel, optional photo cutout in the center. Excalidraw / late-night strategy session energy.
+4. **Cinematic character on void** — pitch-black background filling the frame, ONE photoreal or stylized 3D character offset to the right third with massive empty negative space on the left, rim-lit silhouette. Bold, viral, slightly absurd. MrBeast-adjacent / TikTok-thumbnail framing.
+5. **Halftone classical illustration** — flat saturated single-color background (electric teal / hot coral / sunflower / cobalt), one large flat-color geometric accent shape (sun / arch / rectangle), and a vintage halftone-stipple illustration of a classical subject (Greco-Roman bust, anatomy plate, engraving) floating over it. Higgsfield-style magazine zine.
+
+#### Target-aware canvas + safe-area
+
+- **Medium cover** — 16:9 at 1400×788 px (Medium's recommended size). The prompt demands the focal subject sits in the central third with **15-20% safe-area padding on every side** so the image survives Medium's aggressive cropping into homepage / social / mobile thumbnails.
+- **X Article header** — 5:2 at 3840×1536 px (4K). The prompt demands **18-22% safe-area padding on the left and right** because the ultra-wide format gets cropped tighter than 16:9 in feed cards.
+
+#### Hard guarantees baked into every prompt
+
+- **NO article-title typography in the AI image.** The title is added later by the X / Medium editor as a separate text overlay. The prompt explicitly forbids embedded headlines, subtitles, captions, logos, watermarks, UI chrome, and AI-generated nonsense text. Small in-scene typography that's part of the illustration (e.g. a hand-lettered "Ep. 1" sticker, a fake mock tweet inside a collage) is fine — those are scene props, not the title.
+- **Six-slot anatomy** — Style family + Subject + Composition/safe-area + Palette + Lighting + Technical, woven into one 90-180 word paragraph.
+- **No labels, no quotes, no commentary** — copy the output verbatim into ChatGPT.
 - **Always derived from the English source-of-truth** — even if you're viewing the German translation, the thumbnail prompt is generated from the original English so visual decisions stay grounded.
-- **Modal UX** — opens a focused dialog with: live streaming, aspect ratio + dimensions header, safe-area note, Copy prompt button, **Open in ChatGPT** button (deep-links to chatgpt.com with the prompt pre-filled), and **Regenerate** for a fresh take.
 - **Same Groq fallback chain + zero emojis** as everywhere else.
+
+#### Modal UX
+
+Opens a focused dialog with: aspect ratio + dimensions header, safe-area advisory, **Visual style** dropdown (Auto + 5 families), live streaming output, the active model label, **Copy prompt** button, **Open in ChatGPT** button that deep-links to chatgpt.com with the prompt pre-filled in `?q=`, and **Regenerate** for a fresh take. Changing the style dropdown auto-regenerates with the new family. Esc / backdrop-click closes (disabled while streaming).
 
 ### Translate to German
 
@@ -268,7 +286,8 @@ Streams a single ChatGPT-friendly image-generator prompt for an article cover. S
 ```json
 {
   "markdown": "string (1-40000 chars) — the article we're making a thumbnail for",
-  "target": "medium | x"
+  "target": "medium | x",
+  "style": "auto | scrapbook-collage | editorial-flatlay | dark-diagram | cinematic-character | halftone-classical (optional, defaults to auto)"
 }
 ```
 
@@ -276,9 +295,10 @@ The system prompt enforces:
 
 - **Medium target**: 16:9 (1400×788), focal subject in the central third, 15-20% safe-area padding on every side for Medium's cropping behavior.
 - **X target**: 5:2 (3840×1536, 4K), 18-22% safe-area padding on left and right for X's tighter feed-card crops.
-- Six-slot anatomy: Subject, Style, Lighting, Composition, Mood/Color, Technical.
-- 80-160 words, single paragraph, no quotes / labels / commentary.
-- Negative clause: no text, typography, logos, watermarks, UI overlays, on-image captions, or chart axes.
+- **Style family**: when `style` is `auto`, the model reads the article and picks one of the 5 reference style families that best fits the tone. When `style` is locked, the model is constrained to that family.
+- **Anatomy**: Style family + Subject + Composition/safe-area + Palette + Lighting + Technical, woven into one 90-180 word paragraph, no quotes / labels / commentary.
+- **No article-title typography in the image** — titles are added in the editor as a text overlay.
+- **Negative clause**: no headlines, no subtitles, no captions, no logos, no watermarks, no UI chrome, no AI-generated nonsense text.
 - Zero emojis (same client-side strip applied as defense in depth).
 
 Response: `application/x-ndjson; charset=utf-8`, one event per line, ending with `{"type":"done"}`.
@@ -319,6 +339,8 @@ app/
   layout.tsx              # fonts, dark-mode wrapper, metadata
   page.tsx                # two-column layout
   globals.css             # Medium-style typography
+public/
+  thumbnail-refs/         # 5 reference images that drive the thumbnail-prompt style families
 components/
   Workspace.tsx           # tabbed container (Generate / Rewrite / X Article)
   WriteBlock.tsx          # generate-mode UI, research toggle

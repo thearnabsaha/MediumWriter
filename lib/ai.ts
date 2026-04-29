@@ -561,77 +561,171 @@ export function buildTranslateMessages({
 
 export type ThumbnailTarget = "medium" | "x";
 
+/**
+ * Visual style families distilled from real X-Article header references.
+ * Each family is a self-contained mini art-direction brief; the prompt builder
+ * tells the model to pick ONE family per generation (or honors the user's
+ * locked choice) so output is consistent and recognizable rather than
+ * generic AI slop.
+ */
+export type ThumbnailStyle =
+  | "auto"
+  | "scrapbook-collage"
+  | "editorial-flatlay"
+  | "dark-diagram"
+  | "cinematic-character"
+  | "halftone-classical";
+
+export const THUMBNAIL_STYLE_LABELS: Record<ThumbnailStyle, string> = {
+  auto: "Auto (let the AI pick)",
+  "scrapbook-collage": "Scrapbook collage",
+  "editorial-flatlay": "Editorial flat-lay",
+  "dark-diagram": "Dark diagrammatic UI",
+  "cinematic-character": "Cinematic character on void",
+  "halftone-classical": "Halftone classical illustration",
+};
+
 export type BuildThumbnailPromptArgs = {
   /** The article we're making a thumbnail for. */
   markdown: string;
   /** Where the thumbnail will be used — drives aspect ratio + safe area. */
   target: ThumbnailTarget;
+  /** Optional locked style; if omitted or "auto", the AI picks the best fit. */
+  style?: ThumbnailStyle;
+};
+
+/**
+ * The five reference style families. Each entry is a tight art-direction
+ * brief — what the image looks like, palette, lighting, composition cues,
+ * and any concrete prop ideas. These are reused for both Medium and X targets,
+ * with the canvas-shape advice layered on top.
+ */
+const STYLE_FAMILIES: Record<Exclude<ThumbnailStyle, "auto">, string> = {
+  "scrapbook-collage": `SCRAPBOOK COLLAGE — a torn off-white paper texture as the canvas, with a single hand-drawn ink-and-watercolor cartoon character (or pair of characters) at the focal center performing a concrete action that expresses the article's main idea. Around the character, scatter 4-7 small "pinned" reference elements: mock screenshots of social posts or notes, hand-drawn sticker icons (file icons, RSS feed, PDFs, lightbulb, brain), and curved hand-drawn arrows showing flow from left to right. Use a casual sketchbook palette: pencil/ink lines, soft watercolor washes (denim blue, ochre, slate, dusty olive), small accent flecks of red or teal. Lighting reads as flat ambient daylight on paper. Loose, lived-in, hand-made energy — NOT polished vector graphics. Inspiration: artists like Jean Jullien or sketchbook editorial illustrators.`,
+
+  "editorial-flatlay": `EDITORIAL FLAT-LAY — a clean off-white or warm-cream solid background panel with rounded corners, premium publication feel. The focal element is a tight horizontal row of 8-10 solid-color circular icon-stamps (deep navy or charcoal disks with simple monoline white icons inside — chat bubble, brain, gauge, shield-with-plus, moon, clock, folder, etc.) sitting in the lower-central third of the frame. Optionally, one small accent disk in a warm coral or saffron at the far left of the row breaks the rhythm. The upper half of the image is intentionally EMPTY (off-white) so a title can be added later in the editor. Mood: confident, minimal, "premium product launch" energy. Lighting: flat even diffused light, no shadows. Inspiration: Stripe Press, Linear changelog visuals, Notion product covers.`,
+
+  "dark-diagram": `DARK DIAGRAMMATIC UI — a pitch-black background. The focal arrangement is a hand-drawn whiteboard-style diagram in chalky white strokes: 3-7 rounded rectangle "panels" (some glassy translucent purple or deep emerald, some thin-stroke white outlines) connected by hand-drawn white arrows with slightly wobbly lines. The center panel may contain a single photo cutout (a person's face, an object, or a key visual) or a punchy 1-2 word handwritten label. Side panels contain small monoline icons (play button, checkmark, gear) or short handwritten labels (Sleep, Exercise, Episode 1). Color: ~85% black background, white strokes, ONE saturated accent color (deep purple, emerald, or electric coral) on the focal panel only. Energy: Excalidraw / whiteboard / late-night strategy session. Lighting: subtle inner glow on the accent panels, otherwise flat.`,
+
+  "cinematic-character": `CINEMATIC CHARACTER ON VOID — a pitch-black background filling the entire frame with massive negative space. ONE single photoreal or stylized 3D character (a person, creature, mascot, or stylized object) is positioned on the RIGHT third of the frame, three-quarter or slight-front view, looking toward the camera or off to the left. The LEFT two-thirds of the frame are completely empty black void — that empty space is the point and is where a title will be overlaid later in the editor. Subject is rim-lit from one side with subtle volumetric falloff so the silhouette pops cleanly off the black. Mood: bold, viral, slightly absurd or uncanny — confident and meme-aware. Palette: 95% black, with the subject providing the only color (skin tones, fabric, props). Inspiration: viral X / TikTok thumbnails, MrBeast-adjacent character framing.`,
+
+  "halftone-classical": `HALFTONE CLASSICAL ILLUSTRATION — a flat saturated single-color background (electric teal, hot coral, sunflower yellow, or cobalt blue) fills the canvas. Floating in the upper-center, one large flat-color geometric accent shape (a perfect circle "sun", a thick rectangle, or a half-arch) in a complementary warm tone like burnt orange or amber. Over the accent shape, place ONE high-contrast vintage halftone-stipple illustration of a classical subject — a Greco-Roman statue head, a marble bust, an anatomy plate figure, an old-engraving animal, a botanical print — rendered in pure black-and-white halftone dots / engraving lines, mid-action and confident. The illustration is the focal element and reads at thumbnail size. Mood: bold, magazine-cover, slightly editorial-zine. Lighting: flat, no rendered shadows — the depth comes entirely from the halftone stippling. Inspiration: Higgsfield headers, vintage editorial design, modern tech-startup zine covers.`,
 };
 
 const THUMBNAIL_RULES_COMMON = `OUTPUT FORMAT:
-- Output exactly ONE prompt, written as a single tightly-packed paragraph (or 2 short paragraphs at most). 80-160 words is ideal — long enough to be specific, short enough to feed straight into ChatGPT.
+- Output exactly ONE prompt, written as a single tightly-packed paragraph (or 2 short paragraphs at most). 90-180 words is ideal — long enough to lock in the chosen style family and the safe-area requirement, short enough to feed straight into ChatGPT.
 - Do NOT wrap the prompt in quotes, code fences, or markdown. Do NOT prefix with "Prompt:" or any label. Output only the prompt text.
 - Do NOT add commentary, alternatives, options, or "feel free to adjust" notes. The user copies your output verbatim into their image generator.
 - ZERO emojis anywhere in the prompt.
 
-PROMPT ANATOMY (use all six in natural prose, in roughly this order):
-1. SUBJECT — One concrete focal scene that visually expresses the article's main idea. Be specific about the object/person/scene, action, and spatial relationships. Avoid abstract concepts ("success", "growth"); pick a concrete metaphor instead (e.g. a single open notebook on a desk by a rain-flecked window).
-2. STYLE — Pick ONE clear visual style: editorial photography, cinematic still, minimalist illustration, isometric 3D render, hand-drawn ink and watercolor, oil painting, paper-cut craft, brutalist graphic design, etc. Match the article's tone (technical → clean illustration; personal essay → moody photo; viral take → bold graphic).
-3. LIGHTING — Always specify lighting explicitly. Examples: soft golden-hour side light, overcast diffused daylight, warm tungsten desk lamp from camera-left, cool morning blue-hour, dramatic chiaroscuro from a single source, neon-tinted nighttime ambience.
-4. COMPOSITION — Center the focal subject in the middle THIRD of the frame. Specify camera angle (eye-level / slight high angle / dramatic low angle / overhead flat-lay), and how much negative space surrounds the subject.
-5. MOOD / COLOR — One mood adjective and a small palette: e.g. "calm and contemplative, muted earth tones with one warm accent" or "energetic and confident, deep navy and electric coral".
-6. TECHNICAL — Mention the rendering quality (sharp focus, cinematic depth of field, shallow DOF, photorealistic, ultra-detailed) and any camera-style cue if photographic (50mm lens, full-frame, etc.).
+PROMPT ANATOMY — weave all of these into one natural-prose paragraph:
+1. STYLE FAMILY — name the chosen family in the first sentence (e.g. "A torn-paper scrapbook collage illustration..." or "A pitch-black cinematic character portrait..."). Lock to that family — do NOT mix two styles.
+2. SUBJECT — one concrete focal scene that expresses the article's main idea. Be specific about object/person/action/spatial relationship. Avoid abstract concepts ("success", "growth"); pick a concrete visual metaphor.
+3. COMPOSITION + SAFE-AREA — describe how the subject sits within the canvas and which area must remain visually quiet for crop and editor-overlay safety (see canvas-specific section above).
+4. PALETTE — 2-4 named colors and their roles (e.g. "off-white paper background, denim-blue ink linework, ochre and slate watercolor washes, one small red accent fleck").
+5. LIGHTING — the lighting cue from the chosen style family (flat ambient, rim-lit on black, halftone-only no-shadow, flat diffused, etc.).
+6. TECHNICAL — render quality, finish, and the explicit aspect-ratio + dimensions string from the canvas-specific section above. End with the negative clause.
 
-NEGATIVE / EXCLUSIONS — End the prompt with a short "no" clause:
-"No text, no typography, no logos, no watermarks, no UI overlays, no on-image captions, no chart axes."`;
+CRITICAL — DO NOT EMBED TITLE TEXT IN THE IMAGE:
+- The article title and any subtitle will be added LATER in the X / Medium editor as a separate text overlay. The AI image must contain NO embedded title typography, NO headline, NO subtitle, NO publication name, NO byline.
+- Small in-scene typography that is part of the illustration is OK (e.g. "Ep. 1" hand-lettered on a sticker icon, a fake mock tweet that is part of a collage, a hand-written "Sleep" label inside a diagram panel). These are NOT the article title — they are scene props.
+- The big-typography references you may have seen ("Free Claude Tokens: 10 Habits...", "how to make viral tiktok ai character") had their title typed in by the editor on top of the AI image. Your prompt asks for the BACKGROUND IMAGE only.
 
-const THUMBNAIL_SYSTEM_PROMPT_MEDIUM = `You are an art director who writes razor-sharp image-generator prompts for Medium article cover images.
+NEGATIVE / EXCLUSIONS — End the prompt with this clause verbatim (or near-verbatim):
+"No article-title typography, no headlines, no subtitles, no captions, no logos, no watermarks, no UI chrome, no chart axes, no AI-generated nonsense text."`;
 
-OUTPUT TARGET — Medium cover image:
-- Aspect ratio: 16:9 (Medium's recommended dimensions are 1400x788 px; minimum 600x338).
-- Medium aggressively crops the cover image into thumbnails for the homepage feed, publication feeds, social shares, mobile, and email digests. Your prompt MUST therefore demand:
+const THUMBNAIL_SYSTEM_PROMPT_MEDIUM_HEADER = `You are an art director who writes razor-sharp image-generator prompts for Medium article cover images, in the style of high-end editorial publications.
+
+OUTPUT CANVAS — Medium cover image:
+- Aspect ratio: 16:9. Render dimensions: 1400 x 788 px (Medium's recommended size; minimum 600 x 338).
+- Medium aggressively crops the cover for the homepage feed, publication feeds, social shares, mobile, and email digests. Your prompt MUST therefore demand:
   * The focal subject sits in the CENTRAL THIRD of the frame.
-  * GENEROUS empty/safe-area padding on all four sides — easily 15-20% of the width on the left/right and 15-20% of the height top/bottom must be visually quiet (background, sky, gradient, blur, soft texture) so all crops survive.
-  * Composition reads at thumbnail size — one clear focal point, high contrast between subject and background, no busy clutter.
-- Mention the aspect ratio and the safe-area requirement explicitly inside the prompt itself so the image generator honors them.
+  * GENEROUS quiet padding on all four sides — about 15-20% of the width on the left/right and 15-20% of the height top/bottom must be visually quiet (background, sky, gradient, blur, soft texture, or empty paper) so every crop survives.
+  * The composition reads at thumbnail size — one bold focal point, strong silhouette against a clean ground, high contrast.
+- Mention "16:9 aspect ratio, 1400x788 px" and the safe-area padding requirement explicitly INSIDE the prompt itself.`;
 
-Your job: read the article and write ONE concise, specific image-generator prompt that perfectly captures the article's essence as a Medium cover image.
+const THUMBNAIL_SYSTEM_PROMPT_X_HEADER = `You are an art director who writes razor-sharp image-generator prompts for X (Twitter) Article header images, in the style of high-engagement viral X creators (Karpathy-style scrapbook collages, MrBeast-style character voids, magazine-cover halftone illustrations, Excalidraw-style dark diagrams, Stripe-Press-style editorial flat-lays).
 
-${THUMBNAIL_RULES_COMMON}
-
-Write the final prompt now. Output only the prompt.`;
-
-const THUMBNAIL_SYSTEM_PROMPT_X = `You are an art director who writes razor-sharp image-generator prompts for X (Twitter) Article header images.
-
-OUTPUT TARGET — X Article header image:
-- Aspect ratio: 5:2 (ultra-wide). Render dimensions: 3840x1536 px (4K).
-- X displays the header at the top of the article and may crop the edges in card previews and feeds. Your prompt MUST therefore demand:
+OUTPUT CANVAS — X Article header image:
+- Aspect ratio: 5:2 (ultra-wide). Render dimensions: 3840 x 1536 px (4K).
+- X crops the edges in card previews and feeds. Your prompt MUST therefore demand:
   * The focal subject sits dead-center horizontally and in the CENTRAL VERTICAL THIRD.
-  * GENEROUS empty/safe-area padding — at least 18-22% of the width on the LEFT and RIGHT must be quiet background (gradient, soft texture, atmosphere, sky, bokeh) because the ultra-wide format gets cropped tighter than 16:9 in feed cards.
-  * Composition reads at small sizes — one bold focal point, strong silhouette, high contrast against background.
-- Because the canvas is ultra-wide, prefer wide cinematic compositions: a horizontal layout, a sweeping landscape, a long flat-lay, or a single subject framed by a wide negative-space gradient.
-- Mention the 5:2 aspect ratio and the wide safe-area padding requirement explicitly inside the prompt itself so the image generator honors them.
+  * GENEROUS quiet padding — at least 18-22% of the width on the LEFT and RIGHT must be empty / atmospheric (solid background, gradient, soft texture, void) because the ultra-wide format gets cropped tighter than 16:9 in card previews.
+  * The composition reads at small sizes — one bold focal point, strong silhouette, high contrast.
+- Because the canvas is ultra-wide, prefer wide horizontal compositions: a sweeping flat-lay, a long collage strip, a single subject offset to one third with massive empty space on the other side, or a centered focal element with broad atmospheric flanks.
+- Mention "5:2 aspect ratio, 3840x1536 px (4K)" and the wide safe-area padding requirement explicitly INSIDE the prompt itself.`;
 
-Your job: read the article and write ONE concise, specific image-generator prompt that perfectly captures the article's essence as an X Article header.
+function buildStyleSelectorBlock(style: ThumbnailStyle): string {
+  if (style === "auto") {
+    return `STYLE SELECTION — read the article and pick the ONE style family below that best fits its tone, topic, and viral angle. Lock to that family for the entire prompt — do NOT mix two styles. State the family explicitly in your first sentence.
+
+When in doubt:
+- Technical / framework / "how it works" articles → DARK DIAGRAMMATIC UI or SCRAPBOOK COLLAGE.
+- Personal essay / reflection / habits / advice → EDITORIAL FLAT-LAY or HALFTONE CLASSICAL ILLUSTRATION.
+- Viral take / contrarian opinion / character-driven → CINEMATIC CHARACTER ON VOID.
+- Cultural commentary / philosophy / big-idea → HALFTONE CLASSICAL ILLUSTRATION.
+- Tools / product walkthroughs / SaaS → EDITORIAL FLAT-LAY or SCRAPBOOK COLLAGE.
+
+THE FIVE STYLE FAMILIES:
+
+1. ${STYLE_FAMILIES["scrapbook-collage"]}
+
+2. ${STYLE_FAMILIES["editorial-flatlay"]}
+
+3. ${STYLE_FAMILIES["dark-diagram"]}
+
+4. ${STYLE_FAMILIES["cinematic-character"]}
+
+5. ${STYLE_FAMILIES["halftone-classical"]}`;
+  }
+
+  const labelMap: Record<Exclude<ThumbnailStyle, "auto">, string> = {
+    "scrapbook-collage": "SCRAPBOOK COLLAGE",
+    "editorial-flatlay": "EDITORIAL FLAT-LAY",
+    "dark-diagram": "DARK DIAGRAMMATIC UI",
+    "cinematic-character": "CINEMATIC CHARACTER ON VOID",
+    "halftone-classical": "HALFTONE CLASSICAL ILLUSTRATION",
+  };
+
+  return `STYLE — LOCKED. The user has chosen the ${labelMap[style]} family for this thumbnail. You MUST use this family — do not deviate, do not mix, do not propose alternatives. State the family explicitly in your first sentence.
+
+STYLE FAMILY BRIEF:
+${STYLE_FAMILIES[style]}`;
+}
+
+function buildThumbnailSystemPrompt(
+  target: ThumbnailTarget,
+  style: ThumbnailStyle,
+): string {
+  const canvasHeader =
+    target === "x"
+      ? THUMBNAIL_SYSTEM_PROMPT_X_HEADER
+      : THUMBNAIL_SYSTEM_PROMPT_MEDIUM_HEADER;
+
+  return `${canvasHeader}
+
+${buildStyleSelectorBlock(style)}
+
+Your job: read the article and write ONE concise, specific image-generator prompt that captures the article's essence using the style family above and the canvas constraints above.
 
 ${THUMBNAIL_RULES_COMMON}
 
 Write the final prompt now. Output only the prompt.`;
+}
 
 export function buildThumbnailPromptMessages({
   markdown,
   target,
+  style = "auto",
 }: BuildThumbnailPromptArgs): ChatMessage[] {
-  const systemPrompt =
-    target === "x"
-      ? THUMBNAIL_SYSTEM_PROMPT_X
-      : THUMBNAIL_SYSTEM_PROMPT_MEDIUM;
+  const systemPrompt = buildThumbnailSystemPrompt(target, style);
 
-  const userContent = `Read the article below and write ONE image-generator prompt for its ${
+  const canvasDescription =
     target === "x"
-      ? "X Article header (5:2, 3840x1536, 4K)"
-      : "Medium cover image (16:9, 1400x788, with safe-area padding for cropping)"
-  }. Follow every rule above.\n\n--- ARTICLE ---\n${markdown.trim()}\n--- END ARTICLE ---\n\nOutput only the image prompt. No labels, no quotes, no commentary.`;
+      ? "X Article header (5:2 ultra-wide, 3840x1536 px / 4K)"
+      : "Medium cover image (16:9, 1400x788 px, with safe-area padding for cropping)";
+
+  const userContent = `Read the article below and write ONE image-generator prompt for its ${canvasDescription}. Follow every rule above. Remember: NO article-title typography in the image — the title goes in the editor as a separate overlay.\n\n--- ARTICLE ---\n${markdown.trim()}\n--- END ARTICLE ---\n\nOutput only the image prompt. No labels, no quotes, no commentary.`;
 
   return [
     { role: "system", content: systemPrompt },
