@@ -7,6 +7,9 @@
     "app/api/translate/route.ts": {
       "maxDuration": 60
     },
+    "app/api/thumbnail/route.ts": {
+      "maxDuration": 30
+    },
     "app/api/research/route.ts": {
       "maxDuration": 30
     }

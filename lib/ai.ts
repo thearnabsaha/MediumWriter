@@ -554,3 +554,87 @@ export function buildTranslateMessages({
     { role: "user", content: userContent },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Thumbnail-prompt mode — write a ChatGPT/DALL-E image prompt for the article
+// ---------------------------------------------------------------------------
+
+export type ThumbnailTarget = "medium" | "x";
+
+export type BuildThumbnailPromptArgs = {
+  /** The article we're making a thumbnail for. */
+  markdown: string;
+  /** Where the thumbnail will be used — drives aspect ratio + safe area. */
+  target: ThumbnailTarget;
+};
+
+const THUMBNAIL_RULES_COMMON = `OUTPUT FORMAT:
+- Output exactly ONE prompt, written as a single tightly-packed paragraph (or 2 short paragraphs at most). 80-160 words is ideal — long enough to be specific, short enough to feed straight into ChatGPT.
+- Do NOT wrap the prompt in quotes, code fences, or markdown. Do NOT prefix with "Prompt:" or any label. Output only the prompt text.
+- Do NOT add commentary, alternatives, options, or "feel free to adjust" notes. The user copies your output verbatim into their image generator.
+- ZERO emojis anywhere in the prompt.
+
+PROMPT ANATOMY (use all six in natural prose, in roughly this order):
+1. SUBJECT — One concrete focal scene that visually expresses the article's main idea. Be specific about the object/person/scene, action, and spatial relationships. Avoid abstract concepts ("success", "growth"); pick a concrete metaphor instead (e.g. a single open notebook on a desk by a rain-flecked window).
+2. STYLE — Pick ONE clear visual style: editorial photography, cinematic still, minimalist illustration, isometric 3D render, hand-drawn ink and watercolor, oil painting, paper-cut craft, brutalist graphic design, etc. Match the article's tone (technical → clean illustration; personal essay → moody photo; viral take → bold graphic).
+3. LIGHTING — Always specify lighting explicitly. Examples: soft golden-hour side light, overcast diffused daylight, warm tungsten desk lamp from camera-left, cool morning blue-hour, dramatic chiaroscuro from a single source, neon-tinted nighttime ambience.
+4. COMPOSITION — Center the focal subject in the middle THIRD of the frame. Specify camera angle (eye-level / slight high angle / dramatic low angle / overhead flat-lay), and how much negative space surrounds the subject.
+5. MOOD / COLOR — One mood adjective and a small palette: e.g. "calm and contemplative, muted earth tones with one warm accent" or "energetic and confident, deep navy and electric coral".
+6. TECHNICAL — Mention the rendering quality (sharp focus, cinematic depth of field, shallow DOF, photorealistic, ultra-detailed) and any camera-style cue if photographic (50mm lens, full-frame, etc.).
+
+NEGATIVE / EXCLUSIONS — End the prompt with a short "no" clause:
+"No text, no typography, no logos, no watermarks, no UI overlays, no on-image captions, no chart axes."`;
+
+const THUMBNAIL_SYSTEM_PROMPT_MEDIUM = `You are an art director who writes razor-sharp image-generator prompts for Medium article cover images.
+
+OUTPUT TARGET — Medium cover image:
+- Aspect ratio: 16:9 (Medium's recommended dimensions are 1400x788 px; minimum 600x338).
+- Medium aggressively crops the cover image into thumbnails for the homepage feed, publication feeds, social shares, mobile, and email digests. Your prompt MUST therefore demand:
+  * The focal subject sits in the CENTRAL THIRD of the frame.
+  * GENEROUS empty/safe-area padding on all four sides — easily 15-20% of the width on the left/right and 15-20% of the height top/bottom must be visually quiet (background, sky, gradient, blur, soft texture) so all crops survive.
+  * Composition reads at thumbnail size — one clear focal point, high contrast between subject and background, no busy clutter.
+- Mention the aspect ratio and the safe-area requirement explicitly inside the prompt itself so the image generator honors them.
+
+Your job: read the article and write ONE concise, specific image-generator prompt that perfectly captures the article's essence as a Medium cover image.
+
+${THUMBNAIL_RULES_COMMON}
+
+Write the final prompt now. Output only the prompt.`;
+
+const THUMBNAIL_SYSTEM_PROMPT_X = `You are an art director who writes razor-sharp image-generator prompts for X (Twitter) Article header images.
+
+OUTPUT TARGET — X Article header image:
+- Aspect ratio: 5:2 (ultra-wide). Render dimensions: 3840x1536 px (4K).
+- X displays the header at the top of the article and may crop the edges in card previews and feeds. Your prompt MUST therefore demand:
+  * The focal subject sits dead-center horizontally and in the CENTRAL VERTICAL THIRD.
+  * GENEROUS empty/safe-area padding — at least 18-22% of the width on the LEFT and RIGHT must be quiet background (gradient, soft texture, atmosphere, sky, bokeh) because the ultra-wide format gets cropped tighter than 16:9 in feed cards.
+  * Composition reads at small sizes — one bold focal point, strong silhouette, high contrast against background.
+- Because the canvas is ultra-wide, prefer wide cinematic compositions: a horizontal layout, a sweeping landscape, a long flat-lay, or a single subject framed by a wide negative-space gradient.
+- Mention the 5:2 aspect ratio and the wide safe-area padding requirement explicitly inside the prompt itself so the image generator honors them.
+
+Your job: read the article and write ONE concise, specific image-generator prompt that perfectly captures the article's essence as an X Article header.
+
+${THUMBNAIL_RULES_COMMON}
+
+Write the final prompt now. Output only the prompt.`;
+
+export function buildThumbnailPromptMessages({
+  markdown,
+  target,
+}: BuildThumbnailPromptArgs): ChatMessage[] {
+  const systemPrompt =
+    target === "x"
+      ? THUMBNAIL_SYSTEM_PROMPT_X
+      : THUMBNAIL_SYSTEM_PROMPT_MEDIUM;
+
+  const userContent = `Read the article below and write ONE image-generator prompt for its ${
+    target === "x"
+      ? "X Article header (5:2, 3840x1536, 4K)"
+      : "Medium cover image (16:9, 1400x788, with safe-area padding for cropping)"
+  }. Follow every rule above.\n\n--- ARTICLE ---\n${markdown.trim()}\n--- END ARTICLE ---\n\nOutput only the image prompt. No labels, no quotes, no commentary.`;
+
+  return [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userContent },
+  ];
+}

@@ -9,6 +9,7 @@ import {
   Clipboard,
   Download,
   ExternalLink,
+  Image as ImageIcon,
   Languages,
   Loader2,
   Pencil,
@@ -19,6 +20,7 @@ import TurndownService from "turndown";
 import { copyArticleToClipboard, downloadAsMarkdown } from "@/lib/copyToMedium";
 import { copyXArticleToClipboard, openXArticleCompose } from "@/lib/copyToX";
 import { useArticleStream } from "@/lib/useArticleStream";
+import ThumbnailPromptDialog from "./ThumbnailPromptDialog";
 
 export type OutputTarget = "medium" | "x";
 
@@ -90,6 +92,7 @@ export default function OutputPreview({
   const [editing, setEditing] = useState(false);
   const [language, setLanguage] = useState<Language>("en");
   const [germanMarkdown, setGermanMarkdown] = useState("");
+  const [thumbnailOpen, setThumbnailOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
 
   const translateStream = useArticleStream("/api/translate");
@@ -312,6 +315,23 @@ export default function OutputPreview({
               </button>
             )}
 
+            {!isTranslating && (
+              <button
+                type="button"
+                onClick={() => setThumbnailOpen(true)}
+                disabled={!markdown.trim()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-900 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-200 dark:hover:bg-violet-900"
+                title={
+                  target === "x"
+                    ? "Generate a ChatGPT image prompt sized for X Articles (5:2, 4K)"
+                    : "Generate a ChatGPT image prompt sized for Medium covers (16:9, 1400x788, with safe-area padding)"
+                }
+              >
+                <ImageIcon size={14} />
+                Thumbnail prompt
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleCopy}
@@ -455,6 +475,13 @@ export default function OutputPreview({
           </article>
         )}
       </div>
+
+      <ThumbnailPromptDialog
+        open={thumbnailOpen}
+        onClose={() => setThumbnailOpen(false)}
+        markdown={markdown}
+        target={target}
+      />
     </div>
   );
 }

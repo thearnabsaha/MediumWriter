@@ -57,6 +57,19 @@ The system prompt instructs the model to use Medium's full formatting toolbox:
 
   If all three are rate-limited or unavailable, the app returns a clean **429** with a friendly retry message. Mid-stream fallbacks are also surfaced as a toast.
 
+### Thumbnail prompt (for ChatGPT image generation)
+
+Every article — Medium or X — gets a **Thumbnail prompt** button on the preview pane. Click it to stream a tightly-crafted, target-aware ChatGPT image prompt you can paste straight into ChatGPT's image generator (or DALL·E / GPT-Image / similar).
+
+- **Target-aware aspect ratios**:
+  - **Medium cover** — 16:9 at 1400×788 px (Medium's recommended size). The prompt explicitly demands the focal subject sits in the central third with **15-20% safe-area padding on every side** so the image survives Medium's aggressive cropping into homepage / social / mobile thumbnails.
+  - **X Article header** — 5:2 at 3840×1536 px (4K). The prompt demands **18-22% safe-area padding on the left and right** because the ultra-wide format gets cropped tighter than 16:9 in feed cards.
+- **Six-slot prompt anatomy** — every prompt covers Subject, Style, Lighting, Composition, Mood/Color, and Technical, in natural prose. 80-160 words. No labels, no quotes, no commentary — just the prompt text.
+- **Negative clause baked in** — every prompt ends with "no text, no typography, no logos, no watermarks, no UI overlays, no captions" so the generated image stays clean.
+- **Always derived from the English source-of-truth** — even if you're viewing the German translation, the thumbnail prompt is generated from the original English so visual decisions stay grounded.
+- **Modal UX** — opens a focused dialog with: live streaming, aspect ratio + dimensions header, safe-area note, Copy prompt button, **Open in ChatGPT** button (deep-links to chatgpt.com with the prompt pre-filled), and **Regenerate** for a fresh take.
+- **Same Groq fallback chain + zero emojis** as everywhere else.
+
 ### Translate to German
 
 Every article — Medium or X, generated or rewritten — gets a **Translate to German** button right above the preview.
@@ -127,6 +140,7 @@ The included [vercel.json](vercel.json) raises the function timeout for the stre
 
 - `/api/generate` — 60s (long-form streaming)
 - `/api/translate` — 60s (long-form streaming)
+- `/api/thumbnail` — 30s (single short prompt)
 - `/api/research` — 30s
 
 > Note: the 60s `maxDuration` requires a Pro plan. On Hobby, drop it to 10s in `vercel.json` — generation still works but very long articles may be cut off near the end.
@@ -247,6 +261,28 @@ The system prompt enforces:
 - Idiomatic `du`-form German, German typographic conventions, no literal word-for-word translation.
 - Zero emojis (same client-side strip applied as defense in depth).
 
+### `POST /api/thumbnail`
+
+Streams a single ChatGPT-friendly image-generator prompt for an article cover. Same NDJSON wire format as `/api/generate` and `/api/translate`, same Groq fallback chain, same retry detector.
+
+```json
+{
+  "markdown": "string (1-40000 chars) — the article we're making a thumbnail for",
+  "target": "medium | x"
+}
+```
+
+The system prompt enforces:
+
+- **Medium target**: 16:9 (1400×788), focal subject in the central third, 15-20% safe-area padding on every side for Medium's cropping behavior.
+- **X target**: 5:2 (3840×1536, 4K), 18-22% safe-area padding on left and right for X's tighter feed-card crops.
+- Six-slot anatomy: Subject, Style, Lighting, Composition, Mood/Color, Technical.
+- 80-160 words, single paragraph, no quotes / labels / commentary.
+- Negative clause: no text, typography, logos, watermarks, UI overlays, on-image captions, or chart axes.
+- Zero emojis (same client-side strip applied as defense in depth).
+
+Response: `application/x-ndjson; charset=utf-8`, one event per line, ending with `{"type":"done"}`.
+
 ### `POST /api/research`
 
 Runs a Tavily web search.
@@ -276,6 +312,7 @@ Returns:
 app/
   api/generate/route.ts   # streaming Groq endpoint, generate + rewrite + x modes, fallback chain
   api/translate/route.ts  # streaming Groq endpoint for English -> German translation
+  api/thumbnail/route.ts  # streaming Groq endpoint for ChatGPT thumbnail-prompt generation
   api/research/route.ts   # Tavily web search endpoint
   icon.svg                # favicon (32x32 / 64x64 SVG)
   apple-icon.tsx          # iOS home-screen icon (dynamic 180x180 PNG via next/og)
@@ -289,11 +326,12 @@ components/
   XArticleBlock.tsx       # X-Article UI, sub-mode toggle, char meter, auto-research
   GenerationStatus.tsx    # model chip + fallback note + research status
   StyleBlock.tsx
-  OutputPreview.tsx       # target-aware preview, Copy + Open compose, Translate-to-German toggle
+  OutputPreview.tsx       # target-aware preview, Copy + Open compose, Translate-to-German, Thumbnail-prompt
+  ThumbnailPromptDialog.tsx # modal that streams a ChatGPT image prompt for the article
   DarkModeToggle.tsx
   Spinner.tsx
 lib/
-  ai.ts                   # MODEL_FALLBACK_CHAIN + prompt builders (generate/rewrite/x/translate)
+  ai.ts                   # MODEL_FALLBACK_CHAIN + prompt builders (generate/rewrite/x/translate/thumbnail)
   groqStream.ts           # shared Groq fallback streaming + retry detector + NDJSON encoder
   useArticleStream.ts     # NDJSON parser hook + emoji stripper, configurable endpoint
   styleProcessor.ts       # heuristic style summary
