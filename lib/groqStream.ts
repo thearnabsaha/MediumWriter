@@ -9,14 +9,21 @@ import {
 /**
  * Decide whether a Groq error means we should try the next model in the chain.
  *
- * Retryable:
- *   - 429 (rate-limit), 502/503/504 (transient server / capacity)
+ * Retryable (each model has its own TPM/TPD/RPM/RPD bucket — falling back to
+ * 20B / safeguard-20B works even when 120B is rate-limited):
+ *   - 408 (timeout), 429 (RPM/RPD rate-limit), 500 / 502 / 503 / 504 (transient)
+ *   - 413 (Groq returns this when TPM/TPD is exceeded for the current model —
+ *     "Request too large for model X ... on tokens per minute/day". Critical for
+ *     the 120B → 20B fallback because the daily token cap on 120B trips 413,
+ *     not 429)
+ *   - 498 (Groq custom status: Flex Tier capacity exceeded)
  *   - APIConnectionError / fetch failures (transient network)
- *   - quota / capacity / overloaded / unavailable / model_not_found / decommissioned
+ *   - quota / capacity / overloaded / unavailable / model_not_found /
+ *     decommissioned / "tokens per minute" / "tokens per day" / "service tier"
  *
- * NOT retryable:
- *   - 400 (bad request — same payload will fail on the next model too)
- *   - 401 / 403 (auth — same key will fail everywhere)
+ * NOT retryable (same payload + key will fail on the next model too):
+ *   - 400 (bad request), 401 (auth), 403 (forbidden), 404 (model gone),
+ *     422 (semantic error), 424 (dependency)
  */
 export function isRetryableGroqError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
@@ -26,8 +33,18 @@ export function isRetryableGroqError(err: unknown): boolean {
     name?: string;
     message?: string;
   };
-  if (e.status === 429) return true;
-  if (e.status === 502 || e.status === 503 || e.status === 504) return true;
+  if (
+    e.status === 408 ||
+    e.status === 413 ||
+    e.status === 429 ||
+    e.status === 498 ||
+    e.status === 500 ||
+    e.status === 502 ||
+    e.status === 503 ||
+    e.status === 504
+  ) {
+    return true;
+  }
 
   const name = (e.name ?? "").toLowerCase();
   if (
@@ -41,6 +58,14 @@ export function isRetryableGroqError(err: unknown): boolean {
   const msg = (e.message ?? "").toLowerCase();
   if (
     msg.includes("rate limit") ||
+    msg.includes("rate-limit") ||
+    msg.includes("ratelimit") ||
+    msg.includes("tokens per minute") ||
+    msg.includes("tokens per day") ||
+    msg.includes("requests per minute") ||
+    msg.includes("requests per day") ||
+    msg.includes("service tier") ||
+    msg.includes("request too large") ||
     msg.includes("quota") ||
     msg.includes("capacity") ||
     msg.includes("unavailable") ||
